@@ -1,0 +1,216 @@
+name: Repair Verify Runtime Deliver APK v2
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/repair-runtime-deliver-v2.yml' ]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN_ID: '35017787474'
+  SOURCE_ARTIFACT: Conquest-Femdom-Frontline-0.15-Android-final
+  PACKAGE: com.harekuto.conquestfrontline
+  ACTIVITY: com.nekobot.rpgnekos.MainActivity
+  APK_NAME: Conquest-Femdom-Frontline-0.15-Android-verified.apk
+
+jobs:
+  repair-test-deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "emulator" "build-tools;36.0.0" \
+            "system-images;android-35;google_apis;x86_64"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          "$ANDROID_HOME/platform-tools/adb" version
+
+      - name: Download source APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.SOURCE_ARTIFACT }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: harekuto/test
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Repair NW.js guard and sign corrected APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work/patch/assets/www/js/plugins release runtime-report
+          SRC="$(find source -type f -name '*.apk' -print -quit)"
+          test -s "$SRC"
+          TARGET=assets/www/js/plugins/weOFipHl1hMJ.js
+          unzip -p "$SRC" "$TARGET" > "work/patch/$TARGET"
+
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('work/patch/assets/www/js/plugins/weOFipHl1hMJ.js')
+          lines=p.read_text(encoding='utf-8-sig').splitlines()
+          n=0
+          for i,line in enumerate(lines):
+              if line.lstrip().startswith('if(') and 'Utils.RPGMAKER_VERSION < "1.6.0"' in line and 'node-webkit' in line:
+                  lines[i]='if((typeof process !== "undefined" && process.versions && process.versions["node-webkit"] ? process.versions["node-webkit"] : "0.0.0") >= "0.13.0" && Utils.RPGMAKER_VERSION < "1.6.0") {'
+                  n += 1
+              elif line.lstrip().startswith('_.isNewNWjs =') and 'node-webkit' in line:
+                  lines[i]='_.isNewNWjs = (typeof process !== "undefined" && process.versions && process.versions["node-webkit"] ? process.versions["node-webkit"] : "0.0.0") >= "0.13.0";'
+                  n += 1
+          if n != 2:
+              raise SystemExit(f'Expected exactly 2 NW.js guard lines, patched {n}')
+          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          Path('runtime-report/js-repair.txt').write_text(f'Corrected NW.js guard lines: {n}\n')
+          PY
+          node --check "work/patch/$TARGET"
+          grep -n 'node-webkit' "work/patch/$TARGET" | tee -a runtime-report/js-repair.txt
+
+          cp "$SRC" work/unsigned.apk
+          zip -q -d work/unsigned.apk 'META-INF/*' || true
+          (cd work/patch && zip -q -u "$GITHUB_WORKSPACE/work/unsigned.apk" "$TARGET")
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -p 4 work/unsigned.apk work/aligned.apk
+          keytool -genkeypair -keystore work/debug.keystore -storepass android -alias androiddebugkey -keypass android \
+            -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -keysize 2048 -validity 10000 -noprompt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks work/debug.keystore --ks-key-alias androiddebugkey \
+            --ks-pass pass:android --key-pass pass:android \
+            --out "release/$APK_NAME" work/aligned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "release/$APK_NAME" | tee runtime-report/apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "release/$APK_NAME" | tee runtime-report/aapt-badging.txt
+          sha256sum "release/$APK_NAME" | tee runtime-report/apk.sha256
+          stat -c 'APK bytes: %s' "release/$APK_NAME" | tee runtime-report/apk-size.txt
+          unzip -p "release/$APK_NAME" "$TARGET" > runtime-report/final-weOFipHl1hMJ.js
+          node --check runtime-report/final-weOFipHl1hMJ.js
+          ! grep -q 'process.versions && (typeof process' runtime-report/final-weOFipHl1hMJ.js
+
+      - name: Boot Android 15 emulator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          sudo chmod 666 /dev/kvm || true
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n conquest_test -k 'system-images;android-35;google_apis;x86_64' --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd conquest_test \
+            -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect \
+            -memory 4096 -partition-size 6144 > runtime-report/emulator.txt 2>&1 &
+          "$ADB" wait-for-device
+          for i in $(seq 1 120); do
+            [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 2
+          done
+          test "$("$ADB" shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          "$ADB" shell settings put global window_animation_scale 0
+          "$ADB" shell settings put global transition_animation_scale 0
+          "$ADB" shell settings put global animator_duration_scale 0
+          "$ADB" shell wm size | tee runtime-report/emulator-size.txt
+
+      - name: Install and launch corrected APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          APK="release/$APK_NAME"
+          "$ADB" install -r "$APK" | tee runtime-report/adb-install.txt
+          "$ADB" logcat -c
+          "$ADB" shell am force-stop "$PACKAGE"
+          "$ADB" shell am start -W -n "$PACKAGE/$ACTIVITY" | tee runtime-report/am-start.txt
+          sleep 30
+          "$ADB" shell pidof "$PACKAGE" | tee runtime-report/pid.txt
+          test -s runtime-report/pid.txt
+          "$ADB" shell dumpsys activity activities > runtime-report/activities.txt
+          "$ADB" logcat -d -v threadtime > runtime-report/logcat.txt
+          "$ADB" exec-out screencap -p > runtime-report/screenshot.png
+          if grep -E 'FATAL EXCEPTION|Process: com\.harekuto\.conquestfrontline.*has died|SIG(SEGV|ABRT)' runtime-report/logcat.txt; then
+            echo 'Native/Android fatal runtime error detected' >&2; exit 31
+          fi
+          if grep -E 'RPGWEB.*\[AndroidPort\]\[(uncaught|promise)\]|RPGWEB.*(Uncaught (ReferenceError|TypeError|SyntaxError)|ReferenceError: process is not defined)' runtime-report/logcat.txt; then
+            echo 'JavaScript fatal runtime error detected' >&2; exit 32
+          fi
+          if ! grep -q 'RPGWEB.*PAGE_FINISHED' runtime-report/logcat.txt; then
+            echo 'WebView page-finished marker missing' >&2
+            grep -E 'RPGWEB|chromium|AndroidRuntime' runtime-report/logcat.txt | tail -300 >&2 || true
+            exit 33
+          fi
+          grep -E 'RPGWEB|chromium|AndroidRuntime' runtime-report/logcat.txt | tail -400 > runtime-report/relevant-logcat.txt || true
+          printf 'install=PASS\nlaunch=PASS\nprocess_alive=PASS\npage_finished=PASS\nfatal_android=NONE\nfatal_js=NONE\n' | tee runtime-report/runtime-status.txt
+
+      - name: Split corrected APK for transfer
+        if: success()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p parts
+          split -b 300M -d -a 2 "release/$APK_NAME" parts/conquest-final.part-
+          sha256sum parts/conquest-final.part-* > parts/SHA256SUMS.txt
+          sha256sum "release/$APK_NAME" > parts/APK-SHA256.txt
+          ls -lh parts | tee runtime-report/split-files.txt
+
+      - name: Upload part 00
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-part-00
+          path: parts/conquest-final.part-00
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload part 01
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-part-01
+          path: parts/conquest-final.part-01
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload part 02
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-part-02
+          path: parts/conquest-final.part-02
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload part 03
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-part-03
+          path: parts/conquest-final.part-03
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload checksums
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-checksums
+          path: |
+            parts/SHA256SUMS.txt
+            parts/APK-SHA256.txt
+          retention-days: 1
+
+      - name: Upload runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-verified-v2-runtime-diagnostics
+          path: runtime-report/
+          if-no-files-found: warn
+          retention-days: 1
