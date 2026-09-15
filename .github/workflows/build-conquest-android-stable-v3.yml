@@ -1,0 +1,473 @@
+name: Build Conquest Android Stable v3
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/build-conquest-android-stable-v3.yml' ]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  DRIVE_URL: https://drive.google.com/file/d/1EYTtiK8oaoy3ZXomkEewS1dykt8iix2s/view?usp=drivesdk
+  TEMPLATE_REPO: https://github.com/NEKOBOTMX/rpgmaker-mv-mz-android-studio.git
+  TEMPLATE_COMMIT: 9b98ef8345dc3879d3d4426a41ce8b3b743be2d7
+  APK_NAME: Conquest-Femdom-Frontline-0.15-Android-stable-v3.apk
+  PACKAGE: com.harekuto.conquestfrontline
+
+jobs:
+  build-test-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade gdown
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "emulator" "platforms;android-36" "build-tools;36.0.0" \
+            "system-images;android-35;google_apis;x86_64"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+
+      - name: Download and inspect original Windows build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/input" report
+          gdown "$DRIVE_URL" -O "$RUNNER_TEMP/input/game.zip"
+          python - <<'PY'
+          from pathlib import Path
+          import os, zipfile, hashlib
+          p=Path(os.environ['RUNNER_TEMP'])/'input/game.zip'
+          if not zipfile.is_zipfile(p): raise SystemExit('Drive file is not a ZIP')
+          h=hashlib.sha256()
+          with p.open('rb') as f:
+              for c in iter(lambda:f.read(8*1024*1024),b''): h.update(c)
+          with zipfile.ZipFile(p) as z:
+              info=z.infolist()
+              text=f'zip_bytes={p.stat().st_size}\nzip_sha256={h.hexdigest()}\nentries={len(info)}\nuncompressed={sum(x.file_size for x in info)}\n'
+          Path('report/input.txt').write_text(text); print(text)
+          PY
+
+      - name: Extract RPG Maker MV web root safely
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/extracted"
+          python - <<'PY'
+          from pathlib import Path
+          import os, zipfile
+          src=Path(os.environ['RUNNER_TEMP'])/'input/game.zip'; out=Path(os.environ['RUNNER_TEMP'])/'extracted'; base=out.resolve()
+          with zipfile.ZipFile(src) as z:
+              for i in z.infolist():
+                  d=(out/i.filename).resolve()
+                  if d!=base and base not in d.parents: raise SystemExit('Unsafe ZIP entry: '+i.filename)
+              z.extractall(out)
+          cand=[]
+          for idx in out.rglob('index.html'):
+              r=idx.parent
+              score=(100 if (r/'js/rpg_core.js').exists() else 0)+(30 if (r/'data/System.json').exists() else 0)
+              cand.append((score,-len(r.parts),r))
+          if not cand: raise SystemExit('No web root')
+          cand.sort(reverse=True); score,_,root=cand[0]
+          if score<100: raise SystemExit('Not RPG Maker MV')
+          Path('report/webroot.txt').write_text(str(root))
+          print('webroot=',root)
+          PY
+          rm -f "$RUNNER_TEMP/input/game.zip"
+
+      - name: Clone pinned Android wrapper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout "$TEMPLATE_REPO" wrapper
+          cd wrapper && git checkout --detach "$TEMPLATE_COMMIT" && rm -rf .git && cd ..
+          WEBROOT="$(cat report/webroot.txt)"
+          DEST=wrapper/android/app/src/main/assets/www
+          rm -rf "$DEST" && mkdir -p "$DEST"
+          cp -a "$WEBROOT"/. "$DEST"/
+          rm -rf "$RUNNER_TEMP/extracted"
+
+      - name: Strip Windows runtime and stale desktop data
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('wrapper/android/app/src/main/assets/www'); removed=[]
+          def rm(p):
+              if p.is_file(): n=p.stat().st_size; removed.append((n,str(p.relative_to(root)))); p.unlink()
+              elif p.is_dir(): n=sum(x.stat().st_size for x in p.rglob('*') if x.is_file()); removed.append((n,str(p.relative_to(root))+'/')); shutil.rmtree(p)
+          for p in list(root.iterdir()):
+              lo=p.name.lower()
+              if p.is_file() and (p.suffix.lower() in {'.dll','.exe','.pdb'} or (lo.startswith('nw_') and lo.endswith('.pak'))): rm(p)
+          for name in ['resources.pak','icudtl.dat','snapshot_blob.bin','v8_context_snapshot.bin','package.json','credits.html','debug.log','supertoolsengine.html']:
+              rm(root/name)
+          for name in ['locales','swiftshader','save']:
+              rm(root/name)
+          Path('report/removed-windows.txt').write_text(''.join(f'{n}\t{x}\n' for n,x in sorted(removed,reverse=True))+f'TOTAL={sum(n for n,_ in removed)}\n')
+          PY
+
+      - name: Decrypt every RPG Maker MV encrypted asset for Android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json, binascii, hashlib, os
+          root=Path('wrapper/android/app/src/main/assets/www')
+          sysf=root/'data/System.json'; data=json.loads(sysf.read_text(encoding='utf-8-sig'))
+          keyhex=data.get('encryptionKey','')
+          if not keyhex: raise SystemExit('System.json has no RPG Maker encryptionKey')
+          try: key=bytes.fromhex(keyhex)
+          except Exception as e: raise SystemExit('Bad encryptionKey: '+str(e))
+          if len(key)<16: raise SystemExit(f'Encryption key too short: {len(key)}')
+          key=key[:16]
+          mapping={'.rpgmvp':'.png','.rpgmvo':'.ogg','.rpgmvm':'.m4a'}
+          magic={'.png':lambda b:b.startswith(b'\x89PNG\r\n\x1a\n'), '.ogg':lambda b:b.startswith(b'OggS'), '.m4a':lambda b:(len(b)>=12 and b[4:8]==b'ftyp')}
+          counts={}; failures=[]; bytes_out=0
+          for enc_ext,out_ext in mapping.items():
+              files=list(root.rglob('*'+enc_ext)); counts[enc_ext]=len(files)
+              for p in files:
+                  raw=p.read_bytes()
+                  if len(raw)<32: failures.append(f'{p}: too small'); continue
+                  # RPG Maker MV: 16-byte header, first 16 payload bytes XOR encryption key, rest unchanged.
+                  body=bytearray(raw[16:])
+                  for i in range(min(16,len(body))): body[i]^=key[i]
+                  out=p.with_suffix(out_ext); out.write_bytes(body); bytes_out+=len(body)
+                  if not magic[out_ext](body): failures.append(f'{p} -> {out}: bad magic {bytes(body[:16]).hex()}')
+              # Keep encrypted originals only until all files validated.
+          if failures:
+              Path('report/decrypt-failures.txt').write_text('\n'.join(failures))
+              raise SystemExit(f'Asset decrypt validation failed for {len(failures)} files')
+          # Disable encrypted runtime path and remove encrypted duplicates after successful validated conversion.
+          data['hasEncryptedImages']=False; data['hasEncryptedAudio']=False
+          sysf.write_text(json.dumps(data,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
+          for ext in mapping:
+              for p in root.rglob('*'+ext): p.unlink()
+          text='\n'.join([f'{k}={v}' for k,v in counts.items()])+f'\ndecrypted_bytes={bytes_out}\nhasEncryptedImages=false\nhasEncryptedAudio=false\n'
+          Path('report/decryption.txt').write_text(text); print(text)
+          # Explicitly require the asset reported by the real-device screenshot.
+          icon=root/'img/system/IconSet.png'
+          if not icon.is_file() or not icon.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
+              raise SystemExit('IconSet.png was not successfully decrypted')
+          print('IconSet.png OK:',icon.stat().st_size)
+          PY
+
+      - name: Audit asset tree and text references for Android case sensitivity
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re, json
+          root=Path('wrapper/android/app/src/main/assets/www')
+          allfiles=[p for p in root.rglob('*') if p.is_file()]
+          rel={p.relative_to(root).as_posix():p for p in allfiles}
+          lower={k.lower():k for k in rel}
+          collisions={}
+          for k in rel: collisions.setdefault(k.lower(),[]).append(k)
+          case_collisions={k:v for k,v in collisions.items() if len(v)>1}
+          # Find literal paths in JSON/JS/HTML that look like game assets, then detect case-only mismatches or missing paths.
+          rx=re.compile(r'(?:(?:img|audio|movies|fonts)/[A-Za-z0-9_ ./@!#$%&()+,;=\-\[\]{}~]+?\.(?:png|jpg|jpeg|webp|ogg|m4a|mp3|wav|webm|mp4|ttf|woff2?))',re.I)
+          refs=set()
+          for p in root.rglob('*'):
+              if p.is_file() and p.suffix.lower() in {'.js','.json','.html','.css'} and p.stat().st_size<20_000_000:
+                  try:s=p.read_text(encoding='utf-8-sig',errors='ignore')
+                  except:continue
+                  refs.update(x.strip() for x in rx.findall(s))
+          casefix=[]; missing=[]
+          for r in sorted(refs):
+              rr=r.replace('\\','/')
+              if rr in rel: continue
+              if rr.lower() in lower: casefix.append((rr,lower[rr.lower()]))
+              else: missing.append(rr)
+          # Create exact-case aliases only for literal case mismatches. Usually tiny count, avoids Windows-only case assumptions.
+          for wanted,actual in casefix:
+              src=root/actual; dst=root/wanted
+              dst.parent.mkdir(parents=True,exist_ok=True)
+              if not dst.exists(): dst.write_bytes(src.read_bytes())
+          text=f'files={len(allfiles)}\nliteral_asset_refs={len(refs)}\ncase_mismatches_fixed={len(casefix)}\ncase_collisions={len(case_collisions)}\nmissing_literal_refs={len(missing)}\n'
+          text+='\nCASE_FIXES:\n'+'\n'.join(f'{a} <- {b}' for a,b in casefix[:500])
+          text+='\nMISSING_LITERAL_REFS (may be dynamic/optional):\n'+'\n'.join(missing[:1000])
+          Path('report/asset-audit.txt').write_text(text); print(text[:12000])
+          PY
+
+      - name: Add Android/NW.js compatibility guard and ENTER ESC touch controls
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('wrapper/android/app/src/main/assets/www')
+          idx=root/'index.html'; s=idx.read_text(encoding='utf-8-sig',errors='replace')
+          injected=r'''<style id="android-port-controls-style">
+#android-port-controls{position:fixed;right:14px;bottom:14px;z-index:2147483647;display:flex;gap:10px;pointer-events:auto;user-select:none;-webkit-user-select:none;touch-action:none;font-family:sans-serif}
+.android-port-key{min-width:72px;height:48px;padding:0 12px;border:1px solid rgba(255,255,255,.55);border-radius:10px;background:rgba(0,0,0,.48);color:white;font-size:14px;font-weight:700;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.android-port-key:active,.android-port-key.pressed{background:rgba(255,255,255,.28)}
+</style>
+<script id="android-port-compat">
+(function(){
+  // Keep RPG Maker's Utils.isNwjs() false (no require), but prevent plugins from crashing on process.versions.
+  if(typeof window.process==='undefined') window.process={versions:{'node-webkit':'0.0.0'},platform:'android',env:{}};
+  else { process.versions=process.versions||{}; if(!process.versions['node-webkit']) process.versions['node-webkit']='0.0.0'; }
+  window.addEventListener('error',function(e){console.error('[AndroidPort][uncaught] '+String(e.message||e.error||'unknown')+' @ '+String(e.filename||'')+':'+String(e.lineno||0));});
+  window.addEventListener('unhandledrejection',function(e){console.error('[AndroidPort][promise] '+String(e.reason));});
+  function setKey(symbol,down,keyCode,key){
+    try{ if(window.Input&&Input._currentState) Input._currentState[symbol]=!!down; }catch(e){}
+    try{
+      var ev=new KeyboardEvent(down?'keydown':'keyup',{key:key,code:key==='Enter'?'Enter':'Escape',keyCode:keyCode,which:keyCode,bubbles:true,cancelable:true});
+      document.dispatchEvent(ev);
+    }catch(e){}
+  }
+  function installControls(){
+    if(document.getElementById('android-port-controls'))return;
+    var box=document.createElement('div');box.id='android-port-controls';
+    function add(label,symbol,code,key){
+      var b=document.createElement('button');b.type='button';b.className='android-port-key';b.textContent=label;b.setAttribute('aria-label',label);
+      var down=function(e){e.preventDefault();e.stopPropagation();b.classList.add('pressed');setKey(symbol,true,code,key);};
+      var up=function(e){e.preventDefault();e.stopPropagation();b.classList.remove('pressed');setKey(symbol,false,code,key);};
+      b.addEventListener('pointerdown',down,{passive:false});b.addEventListener('pointerup',up,{passive:false});b.addEventListener('pointercancel',up,{passive:false});b.addEventListener('pointerleave',function(e){if(b.classList.contains('pressed'))up(e);},{passive:false});
+      box.appendChild(b);
+    }
+    add('ESC','escape',27,'Escape');add('ENTER','ok',13,'Enter');document.body.appendChild(box);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installControls);else installControls();
+})();
+</script>
+'''
+          # Must execute before RPG Maker/plugin scripts.
+          head=s.lower().find('<head>')
+          if 'android-port-compat' not in s:
+              s=s[:head+6]+injected+s[head+6:] if head>=0 else injected+s
+          idx.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Harden WebView and map Android Back to RPG Maker Escape
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          java=Path('wrapper/android/app/src/main/java/com/nekobot/rpgnekos/MainActivity.java')
+          j=java.read_text()
+          # Imports for diagnostics/intents if absent.
+          if 'import android.util.Log;' not in j: j=j.replace('import android.os.Bundle;','import android.os.Bundle;\nimport android.util.Log;\nimport android.content.Intent;')
+          # Add robust WebSettings immediately after common JavaScript-enable call if not already present.
+          anchor='webSettings.setJavaScriptEnabled(true);'
+          hard='''\n        webSettings.setDomStorageEnabled(true);\n        webSettings.setDatabaseEnabled(true);\n        webSettings.setAllowFileAccess(true);\n        webSettings.setAllowContentAccess(true);\n        webSettings.setAllowFileAccessFromFileURLs(true);\n        webSettings.setAllowUniversalAccessFromFileURLs(true);\n        webSettings.setMediaPlaybackRequiresUserGesture(false);\n        webSettings.setLoadsImagesAutomatically(true);\n        webSettings.setJavaScriptCanOpenWindowsAutomatically(true);'''
+          if anchor in j and 'setAllowFileAccessFromFileURLs(true)' not in j: j=j.replace(anchor,anchor+hard)
+          # Log web console to Logcat.
+          old='''            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {\n                return super.onConsoleMessage(consoleMessage);\n            }'''
+          new='''            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {\n                Log.e("RPGWEB", consoleMessage.sourceId() + ":" + consoleMessage.lineNumber() + " " + consoleMessage.message());\n                return true;\n            }'''
+          j=j.replace(old,new)
+          # Add page marker where template finishes page load.
+          j=j.replace('''            super.onPageFinished(view, url);\n            injectRuntimePatches(view);''','''            super.onPageFinished(view, url);\n            Log.i("RPGWEB", "PAGE_FINISHED " + url);\n            injectRuntimePatches(view);''')
+          # Insert back handler before final class brace. It sends Escape instead of immediately killing the Activity.
+          if 'ANDROID_BACK_AS_ESCAPE' not in j:
+              pos=j.rfind('}')
+              handler=r'''
+    // ANDROID_BACK_AS_ESCAPE
+    @Override
+    public void onBackPressed() {
+        if (webView != null) {
+            webView.evaluateJavascript("(function(){try{if(window.Input&&Input._currentState){Input._currentState.escape=true;setTimeout(function(){Input._currentState.escape=false;},80);}}catch(e){}})();", null);
+        } else {
+            super.onBackPressed();
+        }
+    }
+'''
+              j=j[:pos]+handler+j[pos:]
+          java.write_text(j)
+          PY
+          grep -nE 'AllowFileAccessFromFileURLs|ANDROID_BACK_AS_ESCAPE|RPGWEB' wrapper/android/app/src/main/java/com/nekobot/rpgnekos/MainActivity.java | tee report/webview-patches.txt
+
+      - name: Configure current Android build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          root=Path('wrapper/android')
+          p=root/'build.gradle'; p.write_text(p.read_text().replace('version "8.7.3"','version "8.10.0"'))
+          p=root/'gradle/wrapper/gradle-wrapper.properties'; p.write_text(re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',p.read_text()))
+          p=root/'app/build.gradle'; s=p.read_text().replace('compileSdk 35','compileSdk 36').replace('targetSdk 35','targetSdk 36')
+          s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.conquestfrontline"').replace('versionName "1.0.0"','versionName "0.15-android-stable-v3"')
+          marker='    compileOptions {'
+          insert='''    androidResources {\n        noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "png", "jpg", "jpeg"]\n    }\n\n'''
+          if 'androidResources {' not in s: s=s.replace(marker,insert+marker)
+          p.write_text(s)
+          p=root/'app/src/main/res/values/strings.xml'; p.write_text(re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">Conquest: Femdom Frontline</string>',p.read_text()))
+          p=root/'app/src/main/AndroidManifest.xml'; s=p.read_text()
+          s=s.replace('android:allowBackup="false"','android:allowBackup="false"\n        android:largeHeap="true"\n        android:hardwareAccelerated="true"\n        android:usesCleartextTraffic="true"\n        android:enableOnBackInvokedCallback="false"')
+          p.write_text(s)
+          p=root/'gradle.properties'; s=p.read_text();
+          if 'org.gradle.jvmargs=' not in s:s+='\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
+          p.write_text(s)
+          PY
+
+      - name: Deep pre-build validation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+          g=Path('wrapper/android/app/src/main/assets/www')
+          required=['index.html','js/rpg_core.js','js/rpg_managers.js','js/rpg_objects.js','js/rpg_scenes.js','js/rpg_sprites.js','js/rpg_windows.js','js/plugins.js','data/System.json','img/system/IconSet.png']
+          missing=[x for x in required if not (g/x).is_file()]
+          if missing: raise SystemExit('Missing required core files: '+repr(missing))
+          sys=json.loads((g/'data/System.json').read_text())
+          if sys.get('hasEncryptedImages') or sys.get('hasEncryptedAudio'):raise SystemExit('Encrypted runtime flags still enabled')
+          if list(g.rglob('*.rpgmvp')) or list(g.rglob('*.rpgmvo')) or list(g.rglob('*.rpgmvm')):raise SystemExit('Encrypted assets remain after conversion')
+          # Validate JSON data files and JS syntax candidates with simple structural checks.
+          bad=[]
+          for p in (g/'data').glob('*.json'):
+              try:json.loads(p.read_text(encoding='utf-8-sig'))
+              except Exception as e:bad.append(f'{p.name}: {e}')
+          if bad:raise SystemExit('Invalid RPG data JSON: '+repr(bad[:20]))
+          # Windows binaries must not leak into APK source.
+          win=[p for p in g.rglob('*') if p.is_file() and p.suffix.lower() in {'.dll','.exe','.pdb'}]
+          if win:raise SystemExit('Windows binaries remain: '+repr(win[:20]))
+          text=f'core_required=PASS\njson_files={len(list((g/"data").glob("*.json")))}\nencrypted_remaining=0\nwindows_binaries_remaining=0\nsource_files={len([p for p in g.rglob("*") if p.is_file()])}\nsource_bytes={sum(p.stat().st_size for p in g.rglob("*") if p.is_file())}\n'
+          Path('report/prebuild-validation.txt').write_text(text);print(text)
+          PY
+          node --check wrapper/android/app/src/main/assets/www/js/rpg_core.js
+          node --check wrapper/android/app/src/main/assets/www/js/rpg_managers.js
+          node --check wrapper/android/app/src/main/assets/www/js/plugins.js
+
+      - name: Build Android APK
+        working-directory: wrapper/android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --console=plain | tee "$GITHUB_WORKSPACE/report/gradle-build.log"
+
+      - name: Verify APK package, signature, assets and controls
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SRC=wrapper/android/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p release
+          cp "$SRC" "release/$APK_NAME"
+          APK="release/$APK_NAME"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee report/apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee report/aapt.txt
+          sha256sum "$APK" | tee report/apk.sha256
+          stat -c 'APK bytes: %s' "$APK" | tee report/apk-size.txt
+          python - <<'PY'
+          from zipfile import ZipFile
+          from pathlib import Path
+          import os
+          apk=Path('release')/os.environ['APK_NAME']
+          with ZipFile(apk) as z:
+              names=set(z.namelist())
+              required=['assets/www/index.html','assets/www/img/system/IconSet.png','assets/www/data/System.json','assets/www/js/rpg_core.js']
+              miss=[x for x in required if x not in names]
+              if miss:raise SystemExit('APK missing: '+repr(miss))
+              idx=z.read('assets/www/index.html').decode('utf-8',errors='replace')
+              if 'android-port-controls' not in idx or "add('ESC'" not in idx or "add('ENTER'" not in idx:raise SystemExit('ENTER/ESC controls missing')
+              sys=z.read('assets/www/data/System.json').decode('utf-8')
+              if '"hasEncryptedImages":true' in sys or '"hasEncryptedAudio":true' in sys:raise SystemExit('Encrypted flags reappeared')
+              enc=[n for n in names if n.endswith(('.rpgmvp','.rpgmvo','.rpgmvm'))]
+              if enc:raise SystemExit('Encrypted assets remain in APK')
+              print('APK entries',len(names),'IconSet bytes',len(z.read('assets/www/img/system/IconSet.png')))
+          PY
+          unzip -t "$APK" > report/unzip-test.txt
+
+      - name: Boot Android 15 emulator
+        id: emulator
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          sudo chmod 666 /dev/kvm || true
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n conquest_v3 -k 'system-images;android-35;google_apis;x86_64' --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd conquest_v3 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 -partition-size 6144 > report/emulator.txt 2>&1 &
+          "$ADB" wait-for-device
+          ok=0
+          for i in $(seq 1 120); do
+            if [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then ok=1; break; fi
+            sleep 2
+          done
+          test "$ok" = 1
+          "$ADB" shell wm size | tee report/emulator-size.txt
+
+      - name: Install and smoke-test game runtime
+        if: steps.emulator.outcome == 'success'
+        id: runtime
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"; APK="release/$APK_NAME"
+          "$ADB" install -r "$APK" | tee report/adb-install.txt
+          "$ADB" logcat -c
+          "$ADB" shell am force-stop "$PACKAGE"
+          "$ADB" shell am start -W -n "$PACKAGE/com.nekobot.rpgnekos.MainActivity" | tee report/am-start.txt
+          sleep 35
+          "$ADB" shell pidof "$PACKAGE" | tee report/pid.txt
+          test -s report/pid.txt
+          "$ADB" logcat -d -v threadtime > report/logcat.txt
+          "$ADB" exec-out screencap -p > report/runtime-screen.png || true
+          if grep -E 'FATAL EXCEPTION|SIG(SEGV|ABRT)|Process: com\.harekuto\.conquestfrontline.*has died' report/logcat.txt; then exit 31; fi
+          if grep -E 'RPGWEB.*(Loading Error|Failed to load:|\[AndroidPort\]\[(uncaught|promise)\]|Uncaught (ReferenceError|TypeError|SyntaxError)|ReferenceError: process is not defined)' report/logcat.txt; then exit 32; fi
+          if ! grep -q 'RPGWEB.*PAGE_FINISHED' report/logcat.txt; then grep -E 'RPGWEB|chromium|AndroidRuntime' report/logcat.txt | tail -400 >&2 || true; exit 33; fi
+          grep -E 'RPGWEB|chromium|AndroidRuntime' report/logcat.txt | tail -500 > report/relevant-logcat.txt || true
+          printf 'runtime_smoke=PASS\nprocess_alive=PASS\npage_finished=PASS\nfatal_android=NONE\nfatal_js=NONE\nloading_error=NONE\n' | tee report/runtime-status.txt
+
+      - name: Record test status
+        if: always()
+        shell: bash
+        run: |
+          printf 'emulator_outcome=%s\nruntime_outcome=%s\n' '${{ steps.emulator.outcome }}' '${{ steps.runtime.outcome }}' | tee report/test-status.txt
+
+      - name: Split final APK for transfer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p parts
+          split -b 300M -d -a 2 "release/$APK_NAME" parts/conquest-v3.part-
+          sha256sum parts/conquest-v3.part-* > parts/SHA256SUMS.txt
+          sha256sum "release/$APK_NAME" > parts/FULL-SHA256.txt
+
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-part-00, path: parts/conquest-v3.part-00, compression-level: 0, retention-days: 1 }
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-part-01, path: parts/conquest-v3.part-01, compression-level: 0, retention-days: 1 }
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-part-02, path: parts/conquest-v3.part-02, compression-level: 0, retention-days: 1 }
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-part-03, path: parts/conquest-v3.part-03, compression-level: 0, retention-days: 1 }
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-checksums, path: 'parts/*SHA256*.txt', retention-days: 1 }
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: Conquest-v3-diagnostics, path: report/, if-no-files-found: warn, retention-days: 1 }
