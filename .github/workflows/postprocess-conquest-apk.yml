@@ -1,0 +1,119 @@
+name: Inspect and Split Conquest APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/postprocess-conquest-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  postprocess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download successful APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Conquest-Femdom-Frontlines-Android-APK
+          path: source
+          github-token: ${{ github.token }}
+          repository: harekuto/test
+          run-id: 35017018277
+
+      - name: Verify, inspect selected plugins, and split APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find source -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          echo "APK=$APK"
+          sha256sum "$APK" | tee original-apk.sha256
+          stat -c 'APK bytes: %s' "$APK"
+
+          mkdir -p plugin-inspection parts
+          python - "$APK" <<'PY'
+          import sys, zipfile
+          from pathlib import Path
+          apk=Path(sys.argv[1])
+          wanted=[
+            'assets/www/js/plugins.js',
+            'assets/www/js/plugins/weOFipHl1hMJ.js',
+            'assets/www/js/plugins/KQhrdXCF1VPr.js',
+            'assets/www/js/plugins/KvNEGcYTJgTr.js',
+            'assets/www/js/plugins/VXixxeUkKX6q.js',
+            'assets/www/js/plugins/beV3qlpGfd08.js',
+            'assets/www/js/plugins/dUbB3jQPluIe.js',
+            'assets/www/js/plugins/2j5prXxQugOx.js',
+            'assets/www/js/plugins/5zk1YIZcugJg.js',
+            'assets/www/js/rpg_core.js',
+            'assets/www/js/main.js'
+          ]
+          out=Path('plugin-inspection')
+          with zipfile.ZipFile(apk) as z:
+              names=set(z.namelist())
+              for n in wanted:
+                  if n in names:
+                      target=out/Path(n).name
+                      target.write_bytes(z.read(n))
+                      print('extracted',n,'->',target)
+                  else:
+                      print('missing',n)
+          PY
+
+          # 300 MiB chunks stay below the connector's 512 MiB per-file ceiling.
+          split -b 300M -d -a 2 "$APK" parts/conquest-apk.part-
+          sha256sum parts/* | tee parts/SHA256SUMS.txt
+          ls -lh parts
+
+      - name: Upload plugin inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-plugin-inspection
+          path: |
+            plugin-inspection/
+            original-apk.sha256
+          retention-days: 1
+
+      - name: Upload APK part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-APK-part-00
+          path: parts/conquest-apk.part-00
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload APK part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-APK-part-01
+          path: parts/conquest-apk.part-01
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload APK part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-APK-part-02
+          path: parts/conquest-apk.part-02
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload APK part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-APK-part-03
+          path: parts/conquest-apk.part-03
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload split checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-APK-split-checksums
+          path: parts/SHA256SUMS.txt
+          retention-days: 1
