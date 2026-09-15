@@ -1,4 +1,4 @@
-name: Build Conquest Android Stable v3e
+name: Build Conquest Android Stable v3f
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -110,8 +110,8 @@ jobs:
           set -euxo pipefail
           ADB="$ANDROID_HOME/platform-tools/adb"
           sudo chmod 666 /dev/kvm || true
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n conquest_v3e -k 'system-images;android-35;google_apis;x86_64' --force
-          nohup "$ANDROID_HOME/emulator/emulator" -avd conquest_v3e -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 -partition-size 6144 > report/emulator.txt 2>&1 &
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n conquest_v3f -k 'system-images;android-35;google_apis;x86_64' --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd conquest_v3f -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 -partition-size 6144 > report/emulator.txt 2>&1 &
           "$ADB" wait-for-device
           OK=0
           for i in $(seq 1 120); do
@@ -162,7 +162,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Conquest-v3e-diagnostics
+          name: Conquest-v3f-diagnostics
           path: report/
           if-no-files-found: warn
           retention-days: 3
