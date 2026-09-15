@@ -57,8 +57,8 @@ jobs:
           test -s "$ZIP"
           python - <<'PY'
           from pathlib import Path
-          import hashlib, zipfile
-          p = Path(__import__('os').environ['RUNNER_TEMP'])/'conquest-input'/'conquest-windows.zip'
+          import hashlib, zipfile, os
+          p = Path(os.environ['RUNNER_TEMP'])/'conquest-input'/'conquest-windows.zip'
           print(f'Downloaded bytes: {p.stat().st_size}')
           h=hashlib.sha256()
           with p.open('rb') as f:
@@ -72,7 +72,7 @@ jobs:
               print('ZIP uncompressed bytes:', sum(i.file_size for i in z.infolist()))
           PY
 
-      - name: Extract and identify RPG Maker web root
+      - name: Extract and inspect RPG Maker project
         shell: bash
         run: |
           set -euxo pipefail
@@ -113,7 +113,7 @@ jobs:
           candidates.sort(key=lambda x:(-x[0], x[1]))
           score,_,engine,web=candidates[0]
           if score < 100:
-              raise SystemExit('Found HTML files but no RPG Maker MV/MZ runtime (rpg_core.js/rmmz_core.js)')
+              raise SystemExit('Found HTML files but no RPG Maker MV/MZ runtime')
           Path('port-report/webroot.txt').write_text(str(web), encoding='utf-8')
 
           files=[p for p in web.rglob('*') if p.is_file()]
@@ -127,16 +127,26 @@ jobs:
               except Exception as e:
                   title += f' (System.json parse warning: {e})'
 
-          plugins=[]
+          declared=[]; enabled=[]
           pf=web/'js'/'plugins.js'
           if pf.exists():
               text=pf.read_text(encoding='utf-8-sig', errors='replace')
-              plugins=re.findall(r'"name"\s*:\s*"([^"]+)"', text)
+              start=text.find('['); end=text.rfind(']')
+              if start >= 0 and end > start:
+                  try:
+                      entries=json.loads(text[start:end+1])
+                      declared=[p.get('name','') for p in entries]
+                      enabled=[p.get('name','') for p in entries if p.get('status')]
+                  except Exception:
+                      declared=re.findall(r'"name"\s*:\s*"([^"]+)"', text)
+              else:
+                  declared=re.findall(r'"name"\s*:\s*"([^"]+)"', text)
 
-          suspicious=[]
+          suspicious=[]; suspicious_enabled=[]
           patterns=re.compile(r'\brequire\s*\(|\bprocess\.|\bnw\.|\bgreenworks\b|child_process|\bfs\.(?:read|write|exists|mkdir|unlink|rename)', re.I)
           plugin_dir=web/'js'/'plugins'
           if plugin_dir.exists():
+              enabled_set=set(enabled)
               for f in plugin_dir.rglob('*.js'):
                   try: txt=f.read_text(encoding='utf-8', errors='replace')
                   except Exception: continue
@@ -146,25 +156,26 @@ jobs:
                           hits.append(f'{f.relative_to(web)}:{n}: {line.strip()[:220]}')
                           if len(hits)>=8: break
                   suspicious.extend(hits)
-                  if len(suspicious)>=100: break
+                  if f.stem in enabled_set:
+                      suspicious_enabled.extend(hits)
 
           encrypted={ext:len(list(web.rglob('*'+ext))) for ext in ['.rpgmvp','.rpgmvo','.rpgmvm','.png_','.ogg_','.m4a_']}
+          top_level=sorted([p.name for p in web.iterdir()])
           with report.open('w',encoding='utf-8') as o:
-              o.write(f'Engine: {engine}\n')
-              o.write(f'Chosen web root: {web}\n')
-              o.write(f'Game title: {title}\n')
-              o.write(f'Web files: {len(files)}\n')
-              o.write(f'Web bytes: {total}\n')
+              o.write(f'Engine: {engine}\nChosen web root: {web}\nGame title: {title}\n')
+              o.write(f'Web files: {len(files)}\nWeb bytes: {total}\n')
               o.write('Encrypted assets: '+json.dumps(encrypted)+'\n')
-              o.write(f'Plugin declarations: {len(plugins)}\n')
-              o.write('Plugins:\n'+'\n'.join('  '+x for x in plugins[:400])+'\n')
-              o.write(f'Potential desktop/NW.js-only plugin references: {len(suspicious)}\n')
-              o.write('\n'.join(suspicious)+'\n')
+              o.write(f'Plugin declarations: {len(declared)}\nEnabled plugins: {len(enabled)}\n')
+              o.write('Enabled plugin names:\n'+'\n'.join('  '+x for x in enabled)+'\n')
+              o.write(f'Potential desktop/NW.js-only references (all plugins): {len(suspicious)}\n')
+              o.write(f'Potential desktop/NW.js-only references (enabled plugins): {len(suspicious_enabled)}\n')
+              o.write('\n'.join(suspicious_enabled)+'\n')
+              o.write('Top-level project entries:\n'+'\n'.join('  '+x for x in top_level)+'\n')
           print(report.read_text(encoding='utf-8'))
           PY
           df -h
 
-      - name: Prepare pinned Android wrapper
+      - name: Prepare pinned Android wrapper and strip Windows NW.js runtime
         shell: bash
         run: |
           set -euxo pipefail
@@ -179,6 +190,36 @@ jobs:
           rm -rf "$DEST"
           mkdir -p "$DEST"
           cp -a "$WEBROOT"/. "$DEST"/
+
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('android-port-template/android/app/src/main/assets/www')
+          exact={
+            'Game.exe','nw.exe','nwjc.exe','chromedriver.exe','notification_helper.exe',
+            'nw.dll','node.dll','ffmpeg.dll','libEGL.dll','libGLESv2.dll','d3dcompiler_47.dll',
+            'resources.pak','icudtl.dat','snapshot_blob.bin','v8_context_snapshot.bin',
+            'credits.html','package.json'
+          }
+          removed=[]
+          for name in exact:
+              p=root/name
+              if p.is_file():
+                  removed.append((str(p.relative_to(root)),p.stat().st_size)); p.unlink()
+          for dirname in ('locales','swiftshader'):
+              p=root/dirname
+              if p.is_dir():
+                  import shutil
+                  size=sum(f.stat().st_size for f in p.rglob('*') if f.is_file())
+                  removed.append((dirname+'/',size)); shutil.rmtree(p)
+          # Any additional root-only Windows binaries are platform runtime, not RPG Maker content.
+          for p in list(root.iterdir()):
+              if p.is_file() and p.suffix.lower() in {'.dll','.exe','.pdb'}:
+                  removed.append((p.name,p.stat().st_size)); p.unlink()
+          with Path('port-report/windows-runtime-removed.txt').open('w',encoding='utf-8') as o:
+              for name,size in sorted(removed): o.write(f'{size}\t{name}\n')
+              o.write(f'Total removed bytes: {sum(x[1] for x in removed)}\n')
+          print(Path('port-report/windows-runtime-removed.txt').read_text())
+          PY
           rm -rf "$RUNNER_TEMP/conquest-extracted"
 
       - name: Configure Android 16 build and app identity
@@ -189,39 +230,25 @@ jobs:
           from pathlib import Path
           import re
           root=Path('android-port-template/android')
-
           p=root/'build.gradle'
-          s=p.read_text().replace('version "8.7.3"','version "8.10.0"')
-          p.write_text(s)
-
+          p.write_text(p.read_text().replace('version "8.7.3"','version "8.10.0"'))
           p=root/'gradle/wrapper/gradle-wrapper.properties'
-          s=re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',p.read_text())
-          p.write_text(s)
-
+          p.write_text(re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',p.read_text()))
           p=root/'app/build.gradle'
-          s=p.read_text()
-          s=s.replace('compileSdk 35','compileSdk 36')
+          s=p.read_text().replace('compileSdk 35','compileSdk 36')
           s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.conquestfrontlines"')
-          s=s.replace('targetSdk 35','targetSdk 36')
-          s=s.replace('versionName "1.0.0"','versionName "0.16-android-port1"')
+          s=s.replace('targetSdk 35','targetSdk 36').replace('versionName "1.0.0"','versionName "0.15-android-port1"')
           marker='    compileOptions {'
           insert='''    androidResources {\n        noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "rpgmvo", "rpgmvp", "rpgmvm", "png_", "ogg_", "m4a_"]\n    }\n\n'''
-          if 'androidResources {' not in s:
-              s=s.replace(marker, insert+marker)
+          if 'androidResources {' not in s: s=s.replace(marker,insert+marker)
           p.write_text(s)
-
           p=root/'app/src/main/res/values/strings.xml'
-          s=re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Conquest Femdom Frontlines</string>', p.read_text())
-          p.write_text(s)
-
+          p.write_text(re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">Conquest Femdom Frontlines</string>',p.read_text()))
           p=root/'app/src/main/AndroidManifest.xml'
-          s=p.read_text().replace('android:allowBackup="false"', 'android:allowBackup="false"\n        android:largeHeap="true"\n        android:enableOnBackInvokedCallback="false"')
-          p.write_text(s)
-
+          p.write_text(p.read_text().replace('android:allowBackup="false"','android:allowBackup="false"\n        android:largeHeap="true"\n        android:enableOnBackInvokedCallback="false"'))
           p=root/'gradle.properties'
           s=p.read_text()
-          if 'org.gradle.jvmargs=' not in s:
-              s += '\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
+          if 'org.gradle.jvmargs=' not in s: s+='\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
           p.write_text(s)
           PY
           cat android-port-template/android/app/build.gradle
@@ -238,12 +265,18 @@ jobs:
           elif [[ -f "$GAME/js/rpg_core.js" ]]; then
             echo 'Validated RPG Maker MV runtime'
           else
-            echo 'RPG Maker runtime vanished during copy' >&2
-            exit 1
+            echo 'RPG Maker runtime vanished during copy' >&2; exit 1
           fi
           du -sh "$GAME"
           find "$GAME" -type f | wc -l
-          find "$GAME" -type f -printf '%s %p\n' | sort -nr | head -30 | tee port-report/largest-assets.txt
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('android-port-template/android/app/src/main/assets/www')
+          files=sorted(((p.stat().st_size,p) for p in root.rglob('*') if p.is_file()), reverse=True)[:30]
+          out=Path('port-report/largest-assets.txt')
+          out.write_text(''.join(f'{n} {p}\n' for n,p in files),encoding='utf-8')
+          print(out.read_text())
+          PY
 
       - name: Gradle build debug APK
         working-directory: android-port-template/android
@@ -265,13 +298,8 @@ jobs:
           APK="release/$APK_NAME"
           sha256sum "$APK" | tee port-report/apk.sha256
           stat -c 'APK bytes: %s' "$APK" | tee port-report/apk-size.txt
-
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           "$AAPT" dump badging "$APK" | tee port-report/aapt-badging.txt
-          unzip -l "$APK" | grep -E 'assets/www/index.html|classes.*\.dex|AndroidManifest.xml' | tee port-report/apk-key-entries.txt
-          unzip -l "$APK" | grep -q 'assets/www/index.html'
-          unzip -l "$APK" | grep -Eq 'classes.*\.dex'
-
           python - <<'PY'
           from zipfile import ZipFile
           from pathlib import Path
@@ -280,11 +308,13 @@ jobs:
           with ZipFile(apk) as z:
               names=z.namelist()
               game=[n for n in names if n.startswith('assets/www/') and not n.endswith('/')]
-              if 'assets/www/index.html' not in names:
-                  raise SystemExit('APK lacks RPG Maker index.html')
-              print('APK game asset entries:',len(game))
-              print('APK total ZIP entries:',len(names))
-              Path('port-report/apk-inspection.txt').write_text(f'APK game asset entries: {len(game)}\nAPK total ZIP entries: {len(names)}\n', encoding='utf-8')
+              checks=['assets/www/index.html']
+              for x in checks:
+                  if x not in names: raise SystemExit(f'APK lacks {x}')
+              if not any(n.startswith('classes') and n.endswith('.dex') for n in names): raise SystemExit('APK lacks classes.dex')
+              if any(n.endswith(('.dll','.exe')) and n.startswith('assets/www/') for n in names): raise SystemExit('APK still contains Windows binaries in game assets')
+              text=f'APK game asset entries: {len(game)}\nAPK total ZIP entries: {len(names)}\n'
+              print(text); Path('port-report/apk-inspection.txt').write_text(text,encoding='utf-8')
           PY
 
       - name: Upload APK
