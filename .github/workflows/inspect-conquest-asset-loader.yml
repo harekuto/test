@@ -1,0 +1,110 @@
+name: Inspect Conquest Asset Loader
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-conquest-asset-loader.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DRIVE_URL: https://drive.google.com/file/d/1EYTtiK8oaoy3ZXomkEewS1dykt8iix2s/view?usp=drivesdk
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download and inspect loader internals
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade gdown
+          mkdir -p work report
+          gdown "$DRIVE_URL" -O work/game.zip
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile, json, re, hashlib
+          zpath=Path('work/game.zip')
+          out=[]
+          with zipfile.ZipFile(zpath) as z:
+              names=z.namelist()
+              game_roots=[]
+              for n in names:
+                  if n.endswith('/Game/js/rpg_core.js'):
+                      game_roots.append(n[:-len('js/rpg_core.js')])
+              if not game_roots: raise SystemExit('No Game/js/rpg_core.js')
+              root=game_roots[0]
+              out.append('ROOT='+root)
+              sysname=root+'data/System.json'
+              data=json.loads(z.read(sysname).decode('utf-8-sig'))
+              for k in ['hasEncryptedImages','hasEncryptedAudio','encryptionKey','gameTitle']:
+                  out.append(f'SYSTEM {k}={data.get(k)!r}')
+
+              core=z.read(root+'js/rpg_core.js').decode('utf-8-sig',errors='replace')
+              lines=core.splitlines()
+              patterns=['Decrypter','decryptArrayBuffer','decryptImg','extToEncryptExt','readEncryptionkey','_header','_encryptionKey']
+              out.append('\n=== RPG_CORE RELEVANT ===')
+              hits=set()
+              for i,line in enumerate(lines):
+                  if any(p in line for p in patterns):
+                      for j in range(max(0,i-4),min(len(lines),i+12)): hits.add(j)
+              last=-2
+              for j in sorted(hits):
+                  if j>last+1: out.append('---')
+                  out.append(f'{j+1}: {lines[j]}')
+                  last=j
+
+              jsnames=[n for n in names if n.startswith(root+'js/') and n.endswith('.js')]
+              rx=re.compile(r'Decrypter|decryptArrayBuffer|decryptImg|extToEncryptExt|readEncryptionkey|encryptionKey|rpgmvp|rpgmvo|rpgmvm|hasEncryptedImages|hasEncryptedAudio',re.I)
+              out.append('\n=== ALL JS LOADER PATCH HITS ===')
+              for n in jsnames:
+                  txt=z.read(n).decode('utf-8-sig',errors='replace')
+                  ls=txt.splitlines()
+                  local=[]
+                  for i,line in enumerate(ls):
+                      if rx.search(line):
+                          local.append((i,line))
+                  if local:
+                      out.append('\nFILE '+n)
+                      emitted=set()
+                      for i,line in local[:120]:
+                          for j in range(max(0,i-2),min(len(ls),i+5)):
+                              if j not in emitted:
+                                  out.append(f'{j+1}: {ls[j]}'); emitted.add(j)
+
+              imgs=[n for n in names if n.startswith(root+'img/') and n.endswith('.rpgmvp')]
+              auds=[n for n in names if n.startswith(root+'audio/') and n.endswith(('.rpgmvo','.rpgmvm'))]
+              out.append('\n=== ROOT IMG FILES ===')
+              for n in sorted([n for n in imgs if n.count('/') <= root.count('/')+2])[:100]: out.append(n)
+              out.append('\n=== IMG/SYSTEM FILES ===')
+              for n in sorted([n for n in imgs if '/img/system/' in n])[:200]: out.append(n)
+              out.append('\n=== SAMPLE HEX ===')
+              for label,arr in [('IMG',imgs[:3]),('AUDIO',auds[:3])]:
+                  for n in arr:
+                      raw=z.read(n)
+                      out.append(f'{label} {n} size={len(raw)} first96={raw[:96].hex()}')
+              if imgs and auds:
+                  ri=z.read(imgs[0]); ra=z.read(auds[0])
+                  out.append(f'payload16_equal={ri[16:32]==ra[16:32]}')
+                  out.append(f'img_payload16={ri[16:32].hex()}')
+                  out.append(f'aud_payload16={ra[16:32].hex()}')
+                  out.append(f'img_32_64={ri[32:64].hex()}')
+                  out.append(f'aud_32_64={ra[32:64].hex()}')
+          text='\n'.join(out)
+          Path('report/asset-loader.txt').write_text(text,encoding='utf-8')
+          print(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conquest-asset-loader-inspection
+          path: report/
+          retention-days: 3
