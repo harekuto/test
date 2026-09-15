@@ -1,0 +1,168 @@
+name: Build Conquest Android Stable v3e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-conquest-android-stable-v3e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  DRIVE_URL: https://drive.google.com/file/d/1EYTtiK8oaoy3ZXomkEewS1dykt8iix2s/view?usp=drivesdk
+  TEMPLATE_REPO: https://github.com/NEKOBOTMX/rpgmaker-mv-mz-android-studio.git
+  TEMPLATE_COMMIT: 9b98ef8345dc3879d3d4426a41ce8b3b743be2d7
+  APK_NAME: Conquest-Femdom-Frontline-0.15-Android-stable-v3.apk
+  PACKAGE: com.harekuto.conquestfrontline
+  RELEASE_TAG: conquest-android-stable-v3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade gdown
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Download and validate original game
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work report release
+          gdown "$DRIVE_URL" -O work/game.zip
+          test -s work/game.zip
+          python -c "import zipfile; assert zipfile.is_zipfile('work/game.zip')"
+          sha256sum work/game.zip | tee report/input.sha256
+
+      - name: Prepare and patch RPG Maker MV project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout "$TEMPLATE_REPO" wrapper
+          cd wrapper
+          git checkout --detach "$TEMPLATE_COMMIT"
+          rm -rf .git
+          cd ..
+          python port/extract_rpgmv.py work/game.zip work/extracted wrapper/android/app/src/main/assets/www
+          rm -rf work/game.zip work/extracted
+          python port/stable_v3_patch_v3.py wrapper/android/app/src/main/assets/www wrapper/android/app/src/main/java/com/nekobot/rpgnekos/MainActivity.java report
+          python port/configure_android_v3.py wrapper/android
+          node --check wrapper/android/app/src/main/assets/www/js/rpg_core.js
+          node --check wrapper/android/app/src/main/assets/www/js/rpg_managers.js
+          node --check wrapper/android/app/src/main/assets/www/js/plugins.js
+          test -s wrapper/android/app/src/main/assets/www/img/system/IconSet.png
+
+      - name: Build APK
+        working-directory: wrapper/android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --console=plain | tee "$GITHUB_WORKSPACE/report/gradle-build.log"
+
+      - name: Verify APK deeply
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp wrapper/android/app/build/outputs/apk/debug/app-debug.apk "release/$APK_NAME"
+          APK="release/$APK_NAME"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee report/apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee report/aapt.txt
+          sha256sum "$APK" | tee report/apk.sha256
+          stat -c 'APK bytes: %s' "$APK" | tee report/apk-size.txt
+          unzip -t "$APK" > report/unzip-test.txt
+          unzip -l "$APK" | grep -F 'assets/www/img/system/IconSet.png' | tee report/iconset-in-apk.txt
+          unzip -p "$APK" assets/www/data/System.json | grep -F '"hasEncryptedImages":false' >/dev/null
+          unzip -p "$APK" assets/www/data/System.json | grep -F '"hasEncryptedAudio":false' >/dev/null
+          unzip -p "$APK" assets/www/index.html | grep -F 'android-port-controls' >/dev/null
+          unzip -p "$APK" assets/www/index.html | grep -F "add('ENTER'" >/dev/null
+          unzip -p "$APK" assets/www/index.html | grep -F "add('ESC'" >/dev/null
+          if unzip -l "$APK" | grep -E '\.(rpgmvp|rpgmvo|rpgmvm)$'; then echo 'Encrypted asset remained in APK' >&2; exit 42; fi
+
+      - name: Install emulator system image
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "emulator" "system-images;android-35;google_apis;x86_64"
+
+      - name: Boot Android 15 emulator
+        id: emulator
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          sudo chmod 666 /dev/kvm || true
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n conquest_v3e -k 'system-images;android-35;google_apis;x86_64' --force
+          nohup "$ANDROID_HOME/emulator/emulator" -avd conquest_v3e -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 4096 -partition-size 6144 > report/emulator.txt 2>&1 &
+          "$ADB" wait-for-device
+          OK=0
+          for i in $(seq 1 120); do
+            if [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then OK=1; break; fi
+            sleep 2
+          done
+          test "$OK" = 1
+          "$ADB" shell wm size | tee report/emulator-size.txt
+
+      - name: Runtime smoke test
+        id: runtime
+        if: steps.emulator.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          "$ADB" install -r "release/$APK_NAME" | tee report/adb-install.txt
+          "$ADB" logcat -c
+          "$ADB" shell am force-stop "$PACKAGE"
+          "$ADB" shell am start -W -n "$PACKAGE/com.nekobot.rpgnekos.MainActivity" | tee report/am-start.txt
+          sleep 40
+          "$ADB" shell pidof "$PACKAGE" | tee report/pid.txt
+          test -s report/pid.txt
+          "$ADB" logcat -d -v threadtime > report/logcat.txt
+          "$ADB" exec-out screencap -p > report/runtime-screen.png || true
+          if grep -E 'FATAL EXCEPTION|SIG(SEGV|ABRT)|Process: com\.harekuto\.conquestfrontline.*has died' report/logcat.txt; then exit 31; fi
+          if grep -E 'RPGWEB.*(Loading Error|Failed to load:|\[AndroidPort\]\[(uncaught|promise)\]|Uncaught (ReferenceError|TypeError|SyntaxError)|ReferenceError: process is not defined|Header is wrong|Decryption error)' report/logcat.txt; then exit 32; fi
+          grep -E 'RPGWEB|chromium|AndroidRuntime' report/logcat.txt | tail -600 > report/relevant-logcat.txt || true
+          printf 'runtime_smoke=PASS\nprocess_alive=PASS\nfatal_android=NONE\nfatal_js=NONE\nloading_error=NONE\n' | tee report/runtime-status.txt
+
+      - name: Record runtime status
+        if: always()
+        shell: bash
+        run: |
+          printf 'emulator_outcome=%s\nruntime_outcome=%s\n' '${{ steps.emulator.outcome }}' '${{ steps.runtime.outcome }}' | tee report/test-status.txt
+
+      - name: Publish direct APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --title 'Conquest Android Stable v3' --notes 'Stable Android v3: exact Art Decrypterator 3000 conversion, canonical IconSet case/path fix, case-sensitive Android asset audit, NW.js protection, hardened WebView, Android Back=Escape, ENTER and ESC on-screen controls.'
+          gh release upload "$RELEASE_TAG" "release/$APK_NAME" --clobber
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-v3e-diagnostics
+          path: report/
+          if-no-files-found: warn
+          retention-days: 3
