@@ -1,0 +1,116 @@
+name: Deliver Corrected Conquest APK
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/deliver-corrected-apk.yml' ]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN_ID: '35017787474'
+  SOURCE_ARTIFACT: Conquest-Femdom-Frontline-0.15-Android-final
+  APK_NAME: Conquest-Femdom-Frontline-0.15-Android-corrected.apk
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;36.0.0"
+      - name: Download source APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.SOURCE_ARTIFACT }}
+          path: source
+          github-token: ${{ github.token }}
+          repository: harekuto/test
+          run-id: ${{ env.SOURCE_RUN_ID }}
+      - name: Repair, align, sign, and validate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work/patch/assets/www/js/plugins release report parts
+          SRC="$(find source -type f -name '*.apk' -print -quit)"
+          test -s "$SRC"
+          TARGET=assets/www/js/plugins/weOFipHl1hMJ.js
+          unzip -p "$SRC" "$TARGET" > "work/patch/$TARGET"
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('work/patch/assets/www/js/plugins/weOFipHl1hMJ.js')
+          lines=p.read_text(encoding='utf-8-sig').splitlines()
+          n=0
+          for i,line in enumerate(lines):
+              if line.lstrip().startswith('if(') and 'Utils.RPGMAKER_VERSION < "1.6.0"' in line and 'node-webkit' in line:
+                  lines[i]='if((typeof process !== "undefined" && process.versions && process.versions["node-webkit"] ? process.versions["node-webkit"] : "0.0.0") >= "0.13.0" && Utils.RPGMAKER_VERSION < "1.6.0") {'
+                  n += 1
+              elif line.lstrip().startswith('_.isNewNWjs =') and 'node-webkit' in line:
+                  lines[i]='_.isNewNWjs = (typeof process !== "undefined" && process.versions && process.versions["node-webkit"] ? process.versions["node-webkit"] : "0.0.0") >= "0.13.0";'
+                  n += 1
+          if n != 2: raise SystemExit(f'Expected 2 guard lines, patched {n}')
+          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          Path('report/js-repair.txt').write_text(f'Corrected NW.js guard lines: {n}\n')
+          PY
+          node --check "work/patch/$TARGET"
+          cp "$SRC" work/unsigned.apk
+          zip -q -d work/unsigned.apk 'META-INF/*' || true
+          (cd work/patch && zip -q -u "$GITHUB_WORKSPACE/work/unsigned.apk" "$TARGET")
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -f -p 4 work/unsigned.apk work/aligned.apk
+          keytool -genkeypair -keystore work/debug.keystore -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -keysize 2048 -validity 10000 -noprompt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks work/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out "release/$APK_NAME" work/aligned.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "release/$APK_NAME" | tee report/apksigner.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "release/$APK_NAME" | tee report/aapt-badging.txt
+          unzip -p "release/$APK_NAME" "$TARGET" > report/final-plugin.js
+          node --check report/final-plugin.js
+          ! grep -q 'process.versions && (typeof process' report/final-plugin.js
+          sha256sum "release/$APK_NAME" | tee report/APK-SHA256.txt
+          stat -c 'APK bytes: %s' "release/$APK_NAME" | tee report/apk-size.txt
+          split -b 300M -d -a 2 "release/$APK_NAME" parts/conquest-corrected.part-
+          sha256sum parts/conquest-corrected.part-* | tee report/PART-SHA256.txt
+      - name: Upload part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-corrected-part-00
+          path: parts/conquest-corrected.part-00
+          compression-level: 0
+          retention-days: 1
+      - name: Upload part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-corrected-part-01
+          path: parts/conquest-corrected.part-01
+          compression-level: 0
+          retention-days: 1
+      - name: Upload part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-corrected-part-02
+          path: parts/conquest-corrected.part-02
+          compression-level: 0
+          retention-days: 1
+      - name: Upload part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-corrected-part-03
+          path: parts/conquest-corrected.part-03
+          compression-level: 0
+          retention-days: 1
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-corrected-validation
+          path: report/
+          retention-days: 1
