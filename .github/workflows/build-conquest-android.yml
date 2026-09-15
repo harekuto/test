@@ -53,7 +53,7 @@ jobs:
           set -euxo pipefail
           mkdir -p "$RUNNER_TEMP/conquest-input"
           ZIP="$RUNNER_TEMP/conquest-input/conquest-windows.zip"
-          gdown --fuzzy "$DRIVE_URL" -O "$ZIP"
+          gdown "$DRIVE_URL" -O "$ZIP"
           test -s "$ZIP"
           python - <<'PY'
           from pathlib import Path
@@ -85,7 +85,6 @@ jobs:
           src=Path(os.environ['RUNNER_TEMP'])/'conquest-input'/'conquest-windows.zip'
           out=Path(os.environ['RUNNER_TEMP'])/'conquest-extracted'
           with zipfile.ZipFile(src) as z:
-              # Reject path traversal while retaining exact case/names.
               base=out.resolve()
               for info in z.infolist():
                   dest=(out/info.filename).resolve()
@@ -180,9 +179,6 @@ jobs:
           rm -rf "$DEST"
           mkdir -p "$DEST"
           cp -a "$WEBROOT"/. "$DEST"/
-
-          # The original Windows NW.js executable/runtime remains outside the selected
-          # RPG Maker web root. Only actual game web content is packaged into Android.
           rm -rf "$RUNNER_TEMP/conquest-extracted"
 
       - name: Configure Android 16 build and app identity
@@ -191,18 +187,15 @@ jobs:
           set -euxo pipefail
           python - <<'PY'
           from pathlib import Path
+          import re
           root=Path('android-port-template/android')
 
-          # AGP 8.10 supports API 36 and uses Gradle 8.11.1 / JDK 17.
           p=root/'build.gradle'
-          s=p.read_text()
-          s=s.replace('version "8.7.3"','version "8.10.0"')
+          s=p.read_text().replace('version "8.7.3"','version "8.10.0"')
           p.write_text(s)
 
           p=root/'gradle/wrapper/gradle-wrapper.properties'
-          s=p.read_text()
-          import re
-          s=re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',s)
+          s=re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',p.read_text())
           p.write_text(s)
 
           p=root/'app/build.gradle'
@@ -211,7 +204,6 @@ jobs:
           s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.conquestfrontlines"')
           s=s.replace('targetSdk 35','targetSdk 36')
           s=s.replace('versionName "1.0.0"','versionName "0.16-android-port1"')
-          # Avoid recompressing large game media/encrypted payloads; WebView can access them as assets.
           marker='    compileOptions {'
           insert='''    androidResources {\n        noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "rpgmvo", "rpgmvp", "rpgmvm", "png_", "ogg_", "m4a_"]\n    }\n\n'''
           if 'androidResources {' not in s:
@@ -219,13 +211,11 @@ jobs:
           p.write_text(s)
 
           p=root/'app/src/main/res/values/strings.xml'
-          s=p.read_text()
-          s=re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Conquest Femdom Frontlines</string>', s)
+          s=re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Conquest Femdom Frontlines</string>', p.read_text())
           p.write_text(s)
 
           p=root/'app/src/main/AndroidManifest.xml'
-          s=p.read_text()
-          s=s.replace('android:allowBackup="false"', 'android:allowBackup="false"\n        android:largeHeap="true"\n        android:enableOnBackInvokedCallback="false"')
+          s=p.read_text().replace('android:allowBackup="false"', 'android:allowBackup="false"\n        android:largeHeap="true"\n        android:enableOnBackInvokedCallback="false"')
           p.write_text(s)
 
           p=root/'gradle.properties'
@@ -234,7 +224,6 @@ jobs:
               s += '\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
           p.write_text(s)
           PY
-
           cat android-port-template/android/app/build.gradle
           cat android-port-template/android/app/src/main/AndroidManifest.xml
 
@@ -295,8 +284,7 @@ jobs:
                   raise SystemExit('APK lacks RPG Maker index.html')
               print('APK game asset entries:',len(game))
               print('APK total ZIP entries:',len(names))
-              Path('port-report/apk-inspection.txt').write_text(
-                  f'APK game asset entries: {len(game)}\nAPK total ZIP entries: {len(names)}\n', encoding='utf-8')
+              Path('port-report/apk-inspection.txt').write_text(f'APK game asset entries: {len(game)}\nAPK total ZIP entries: {len(names)}\n', encoding='utf-8')
           PY
 
       - name: Upload APK
