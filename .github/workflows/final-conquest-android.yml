@@ -1,0 +1,277 @@
+name: Final Conquest Android APK
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ '.github/workflows/final-conquest-android.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DRIVE_URL: https://drive.google.com/file/d/1EYTtiK8oaoy3ZXomkEewS1dykt8iix2s/view?usp=drivesdk
+  TEMPLATE_REPO: https://github.com/NEKOBOTMX/rpgmaker-mv-mz-android-studio.git
+  TEMPLATE_COMMIT: 9b98ef8345dc3879d3d4426a41ce8b3b743be2d7
+  APK_NAME: Conquest-Femdom-Frontline-0.15-Android.apk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare Android toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade gdown
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Download and validate supplied game
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/input" port-report
+          gdown "$DRIVE_URL" -O "$RUNNER_TEMP/input/game.zip"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, os, zipfile
+          p=Path(os.environ['RUNNER_TEMP'])/'input/game.zip'
+          if not zipfile.is_zipfile(p): raise SystemExit('Input is not a ZIP')
+          h=hashlib.sha256()
+          with p.open('rb') as f:
+              for c in iter(lambda:f.read(8*1024*1024),b''): h.update(c)
+          with zipfile.ZipFile(p) as z:
+              entries=len(z.infolist()); unpacked=sum(i.file_size for i in z.infolist())
+          Path('port-report/input.txt').write_text(
+              f'bytes={p.stat().st_size}\nsha256={h.hexdigest()}\nentries={entries}\nuncompressed={unpacked}\n')
+          print(Path('port-report/input.txt').read_text())
+          PY
+
+      - name: Extract RPG Maker MV game
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/extracted"
+          python - <<'PY'
+          from pathlib import Path
+          import os, zipfile
+          src=Path(os.environ['RUNNER_TEMP'])/'input/game.zip'
+          out=Path(os.environ['RUNNER_TEMP'])/'extracted'
+          base=out.resolve()
+          with zipfile.ZipFile(src) as z:
+              for i in z.infolist():
+                  dest=(out/i.filename).resolve()
+                  if dest != base and base not in dest.parents: raise SystemExit(f'Unsafe ZIP path: {i.filename}')
+              z.extractall(out)
+          candidates=[]
+          for idx in out.rglob('index.html'):
+              p=idx.parent
+              score=(100 if (p/'js/rpg_core.js').exists() else 0)+(20 if (p/'data/System.json').exists() else 0)
+              candidates.append((score,p))
+          if not candidates: raise SystemExit('No RPG Maker web root')
+          candidates.sort(key=lambda x:-x[0]); score,root=candidates[0]
+          if score < 100: raise SystemExit('Not an RPG Maker MV runtime')
+          Path('port-report/webroot.txt').write_text(str(root))
+          print('RPG Maker MV web root:',root)
+          PY
+          rm -f "$RUNNER_TEMP/input/game.zip"
+
+      - name: Prepare Android wrapper
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none --no-checkout "$TEMPLATE_REPO" wrapper
+          cd wrapper && git checkout --detach "$TEMPLATE_COMMIT" && rm -rf .git && cd ..
+          WEBROOT="$(cat port-report/webroot.txt)"
+          DEST=wrapper/android/app/src/main/assets/www
+          rm -rf "$DEST" && mkdir -p "$DEST"
+          cp -a "$WEBROOT"/. "$DEST"/
+          rm -rf "$RUNNER_TEMP/extracted"
+
+      - name: Remove Windows runtime and developer leftovers
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          root=Path('wrapper/android/app/src/main/assets/www')
+          removed=[]
+          def remove(p):
+              if p.is_file():
+                  n=p.stat().st_size; removed.append((n,str(p.relative_to(root)))); p.unlink()
+              elif p.is_dir():
+                  n=sum(x.stat().st_size for x in p.rglob('*') if x.is_file()); removed.append((n,str(p.relative_to(root))+'/')); shutil.rmtree(p)
+          for p in list(root.iterdir()):
+              low=p.name.lower()
+              if p.is_file() and (p.suffix.lower() in {'.dll','.exe','.pdb'} or low.startswith('nw_') and low.endswith('.pak')): remove(p)
+          for name in ['resources.pak','icudtl.dat','snapshot_blob.bin','v8_context_snapshot.bin','package.json','credits.html','debug.log','supertoolsengine.html']:
+              remove(root/name)
+          for name in ['locales','swiftshader','save']:
+              remove(root/name)
+          text=''.join(f'{n}\t{name}\n' for n,name in sorted(removed,reverse=True))+f'Total removed bytes: {sum(n for n,_ in removed)}\n'
+          Path('port-report/windows-runtime-removed.txt').write_text(text)
+          print(text)
+          PY
+
+      - name: Patch only desktop NW.js detection
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('wrapper/android/app/src/main/assets/www')
+          safe='(typeof process !== "undefined" && process.versions && process.versions["node-webkit"] ? process.versions["node-webkit"] : "0.0.0")'
+          replacements=0; touched=[]
+          for p in root.rglob('*.js'):
+              s=p.read_text(encoding='utf-8-sig',errors='replace')
+              before=s
+              for token in ["process.versions['node-webkit']", 'process.versions["node-webkit"]']:
+                  c=s.count(token)
+                  if c:
+                      replacements+=c; s=s.replace(token,safe)
+              if s != before:
+                  p.write_text(s,encoding='utf-8'); touched.append(str(p.relative_to(root)))
+          report='Desktop NW.js process guards patched: %d\nFiles:\n%s\n' % (replacements,'\n'.join(touched))
+          Path('port-report/android-js-compat.txt').write_text(report)
+          print(report)
+          # Diagnostic only: remaining Node/NW references are kept when they live behind Utils.isNwjs/playtest branches.
+          hits=[]
+          for p in root.rglob('*.js'):
+              for n,line in enumerate(p.read_text(encoding='utf-8',errors='replace').splitlines(),1):
+                  if 'process.' in line or "require('nw.gui')" in line or 'require("nw.gui")' in line:
+                      hits.append(f'{p.relative_to(root)}:{n}: {line.strip()[:240]}')
+          Path('port-report/remaining-node-references.txt').write_text('\n'.join(hits))
+          PY
+
+      - name: Add JavaScript and WebView runtime diagnostics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('wrapper/android/app/src/main/assets/www')
+          idx=root/'index.html'
+          s=idx.read_text(encoding='utf-8-sig',errors='replace')
+          hook='''<script>\nwindow.addEventListener("error",function(e){console.error("[AndroidPort][uncaught] "+(e.message||e.error||"unknown")+" @ "+(e.filename||"")+":"+(e.lineno||0));});\nwindow.addEventListener("unhandledrejection",function(e){console.error("[AndroidPort][promise] "+String(e.reason));});\n</script>\n'''
+          if '[AndroidPort][uncaught]' not in s:
+              pos=s.lower().find('<head>')
+              s=s[:pos+6]+hook+s[pos+6:] if pos>=0 else hook+s
+          idx.write_text(s,encoding='utf-8')
+
+          java=Path('wrapper/android/app/src/main/java/com/nekobot/rpgnekos/MainActivity.java')
+          j=java.read_text()
+          if 'android.util.Log' not in j: j=j.replace('import android.os.Bundle;','import android.os.Bundle;\nimport android.util.Log;\nimport android.content.Intent;')
+          old='''            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {\n                return super.onConsoleMessage(consoleMessage);\n            }'''
+          new='''            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {\n                Log.e("RPGWEB", consoleMessage.sourceId() + ":" + consoleMessage.lineNumber() + " " + consoleMessage.message());\n                return true;\n            }'''
+          j=j.replace(old,new)
+          old='''            Uri uri = request.getUrl();\n            return !"file".equals(uri.getScheme());'''
+          new='''            Uri uri = request.getUrl();\n            if ("file".equals(uri.getScheme())) return false;\n            try {\n                startActivity(new Intent(Intent.ACTION_VIEW, uri));\n            } catch (Exception error) {\n                Log.w("RPGWEB", "Cannot open external URL: " + uri, error);\n            }\n            return true;'''
+          j=j.replace(old,new)
+          j=j.replace('''            super.onPageFinished(view, url);\n            injectRuntimePatches(view);''','''            super.onPageFinished(view, url);\n            Log.i("RPGWEB", "PAGE_FINISHED " + url);\n            injectRuntimePatches(view);''')
+          java.write_text(j)
+          PY
+
+      - name: Configure Android project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          root=Path('wrapper/android')
+          p=root/'build.gradle'; p.write_text(p.read_text().replace('version "8.7.3"','version "8.10.0"'))
+          p=root/'gradle/wrapper/gradle-wrapper.properties'; p.write_text(re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',p.read_text()))
+          p=root/'app/build.gradle'; s=p.read_text().replace('compileSdk 35','compileSdk 36').replace('targetSdk 35','targetSdk 36')
+          s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.conquestfrontline"').replace('versionName "1.0.0"','versionName "0.15-android-port2"')
+          marker='    compileOptions {'
+          insert='''    androidResources {\n        noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "rpgmvo", "rpgmvp", "rpgmvm"]\n    }\n\n'''
+          if 'androidResources {' not in s: s=s.replace(marker,insert+marker)
+          p.write_text(s)
+          p=root/'app/src/main/res/values/strings.xml'; p.write_text(re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">Conquest: Femdom Frontline</string>',p.read_text()))
+          p=root/'app/src/main/AndroidManifest.xml'; p.write_text(p.read_text().replace('android:allowBackup="false"','android:allowBackup="false"\n        android:largeHeap="true"\n        android:enableOnBackInvokedCallback="false"'))
+          p=root/'gradle.properties'; s=p.read_text();
+          if 'org.gradle.jvmargs=' not in s: s+='\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
+          p.write_text(s)
+          PY
+
+      - name: Validate source package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          G=wrapper/android/app/src/main/assets/www
+          test -s "$G/index.html" && test -s "$G/js/rpg_core.js" && test -s "$G/js/plugins.js" && test -s "$G/data/System.json"
+          ! find "$G" -maxdepth 1 -type f \( -iname '*.dll' -o -iname '*.exe' \) | grep -q .
+          python - <<'PY'
+          from pathlib import Path
+          r=Path('wrapper/android/app/src/main/assets/www')
+          files=[p for p in r.rglob('*') if p.is_file()]
+          text=f'packaged_source_files={len(files)}\npackaged_source_bytes={sum(p.stat().st_size for p in files)}\n'
+          Path('port-report/source-package.txt').write_text(text); print(text)
+          PY
+
+      - name: Build APK
+        working-directory: wrapper/android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --console=plain | tee "$GITHUB_WORKSPACE/port-report/gradle-build.log"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SRC=wrapper/android/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p release && cp "$SRC" "release/$APK_NAME"
+          APK="release/$APK_NAME"
+          sha256sum "$APK" | tee port-report/apk.sha256
+          stat -c 'APK bytes: %s' "$APK" | tee port-report/apk-size.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee port-report/aapt-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee port-report/apksigner.txt
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import os
+          apk=Path('release')/os.environ['APK_NAME']
+          with ZipFile(apk) as z:
+              names=z.namelist()
+              required=['assets/www/index.html','assets/www/js/rpg_core.js','assets/www/js/plugins.js','assets/www/data/System.json']
+              missing=[x for x in required if x not in names]
+              if missing: raise SystemExit('Missing required APK content: '+repr(missing))
+              if not any(x.startswith('classes') and x.endswith('.dex') for x in names): raise SystemExit('Missing classes.dex')
+              bad=[x for x in names if x.startswith('assets/www/') and x.lower().endswith(('.dll','.exe'))]
+              if bad: raise SystemExit('Windows binaries remain: '+repr(bad))
+              text=f'apk_entries={len(names)}\ngame_asset_entries={sum(x.startswith("assets/www/") and not x.endswith("/") for x in names)}\n'
+              Path('port-report/apk-inspection.txt').write_text(text); print(text)
+          PY
+
+      - name: Upload final APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-Femdom-Frontline-0.15-Android-final
+          path: release/${{ env.APK_NAME }}
+          compression-level: 0
+          retention-days: 1
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Conquest-final-build-diagnostics
+          path: port-report/
+          if-no-files-found: warn
+          retention-days: 1
