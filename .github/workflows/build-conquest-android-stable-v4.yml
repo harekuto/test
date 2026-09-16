@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-conquest-android-stable-v4.yml'
+      - 'port/configure_android_v3.py'
+      - 'port/stable_v3_patch_v3.py'
+      - 'port/post_hardening_v4.py'
+      - 'port/extract_rpgmv.py'
   workflow_dispatch:
 
 permissions:
@@ -91,6 +95,8 @@ jobs:
           APK="release/$APK_NAME"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee report/apksigner.txt
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee report/aapt.txt
+          grep -F "versionCode='4'" report/aapt.txt >/dev/null
+          grep -F "versionName='0.15-android-stable-v4'" report/aapt.txt >/dev/null
           sha256sum "$APK" | tee report/apk.sha256
           stat -c 'APK bytes: %s' "$APK" | tee report/apk-size.txt
           unzip -t "$APK" > report/unzip-test.txt
