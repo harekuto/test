@@ -15,7 +15,8 @@ s=p.read_text(); s=re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',s); p
 p=root/'app/build.gradle'
 s=p.read_text().replace('compileSdk 35','compileSdk 36').replace('targetSdk 35','targetSdk 36')
 s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.conquestfrontline"')
-s=s.replace('versionName "1.0.0"','versionName "0.15-android-stable-v3"')
+s=re.sub(r'versionCode\s+\d+','versionCode 4',s,count=1)
+s=re.sub(r'versionName\s+"[^"]+"','versionName "0.15-android-stable-v4"',s,count=1)
 marker='    compileOptions {'
 insert='''    androidResources {
         noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "png", "jpg", "jpeg"]
@@ -44,4 +45,4 @@ p=root/'gradle.properties'
 s=p.read_text()
 if 'org.gradle.jvmargs=' not in s: s+='\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\n'
 p.write_text(s)
-print('Android project configured for stable v3; manifest XML validated')
+print('Android project configured for stable v4; manifest XML validated')
