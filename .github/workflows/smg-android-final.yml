@@ -1,4 +1,5 @@
 name: SMG Android Final Build
+# Trigger revision 1
 
 on:
   workflow_dispatch:
