@@ -14,7 +14,8 @@ if not manifest.exists():
 
 package_name = os.environ.get("PACKAGE_NAME", "com.harekuto.supermonstersgirls")
 app_name = os.environ.get("APP_NAME", "Super Monsters'n Girls")
-version_name = os.environ.get("VERSION_NAME", "2.0.2-android-v1")
+version_name = os.environ.get("VERSION_NAME", "2.0.2-android-v1.2")
+version_code = os.environ.get("VERSION_CODE", "102")
 
 s = manifest.read_text(encoding="utf-8")
 m = re.search(r'\bpackage\s*=\s*["\']([^"\']+)["\']', s)
@@ -46,7 +47,7 @@ s = re.sub(
 if re.search(r'android:versionCode\s*=', s):
     s = re.sub(
         r'(android:versionCode\s*=\s*["\'])[^"\']*(["\'])',
-        lambda m: m.group(1) + "1" + m.group(2),
+        lambda m: m.group(1) + version_code + m.group(2),
         s,
     )
 s = re.sub(
@@ -57,6 +58,21 @@ s = re.sub(
 if "android:largeHeap=" not in s:
     s = s.replace("<application ", '<application android:largeHeap="true" ', 1)
 manifest.write_text(s, encoding="utf-8")
+
+# Apktool rebuilds version metadata from apktool.yml for this legacy runner,
+# so patch that source as well or it can silently restore versionName=1.0.0.
+apktool_yml = root / "apktool.yml"
+if apktool_yml.exists():
+    y = apktool_yml.read_text(encoding="utf-8")
+    y = re.sub(r"(?m)^(\s*versionCode:\s*).*$", lambda m: m.group(1) + "'" + version_code + "'", y)
+    y = re.sub(r"(?m)^(\s*versionName:\s*).*$", lambda m: m.group(1) + "'" + version_name + "'", y)
+    apktool_yml.write_text(y, encoding="utf-8")
+
+# Fail early if the decoded manifest itself did not receive the requested values.
+check = manifest.read_text(encoding="utf-8")
+if version_name not in check:
+    raise SystemExit("versionName patch did not reach AndroidManifest.xml")
+
 
 escaped_app_name = app_name.replace("'", "\\'")
 for p in root.rglob("strings.xml"):
