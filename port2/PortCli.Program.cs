@@ -38,7 +38,6 @@ static class Program
         using(var data=DataWinVersionReader.ReadData(patchedData,Log,m=>Console.WriteLine("[UTMT] "+m)))
         {
             var create = """
-display_set_gui_size(640,360);
 depth=-1000000;
 ui_alpha=0.36;
 ui_alpha_pressed=0.62;
@@ -78,40 +77,29 @@ vk_touch_enter=virtual_key_add(540,10,86,34,vk_enter);
 """;
 
             var draw = """
-var old_alpha=draw_get_alpha();
-var old_color=draw_get_color();
-var old_halign=draw_get_halign();
-var old_valign=draw_get_valign();
-var old_font=draw_get_font();
 if (ui_font>=0) draw_set_font(ui_font);
 draw_set_halign(fa_center);
-draw_set_valign(fa_middle);
 
-draw_set_color(c_black);
-draw_set_alpha(keyboard_check(vk_left)?ui_alpha_pressed:ui_alpha); draw_rectangle(22,278,76,334,false);
-draw_set_alpha(keyboard_check(vk_right)?ui_alpha_pressed:ui_alpha); draw_rectangle(104,278,158,334,false);
-draw_set_alpha(keyboard_check(vk_up)?ui_alpha_pressed:ui_alpha); draw_rectangle(62,224,116,278,false);
-draw_set_alpha(keyboard_check(vk_down)?ui_alpha_pressed:ui_alpha); draw_rectangle(62,294,116,346,false);
-draw_set_color(c_white); draw_set_alpha(0.78);
-draw_text(49,306,"<"); draw_text(131,306,">"); draw_text(89,251,"^"); draw_text(89,320,"v");
+// Low-opacity mobile HUD. All rendering calls are supported by the 2.2.2 runtime.
+draw_sprite_ext(spr_joybase,0,18,206,2.35,2.35,0,c_white,0.34);
+draw_sprite_ext(spr_joystick,0,56,258,1.55,1.55,0,c_white,0.38);
+draw_text_colour(49,306,"<",c_white,c_white,c_white,c_white,0.78);
+draw_text_colour(131,306,">",c_white,c_white,c_white,c_white,0.78);
+draw_text_colour(89,250,"^",c_white,c_white,c_white,c_white,0.78);
+draw_text_colour(89,326,"v",c_white,c_white,c_white,c_white,0.78);
 
-draw_set_color(c_black);
-draw_set_alpha(keyboard_check(ord("X"))?ui_alpha_pressed:ui_alpha); draw_circle(482,279,42,false);
-draw_set_alpha(keyboard_check(ord("C"))?ui_alpha_pressed:ui_alpha); draw_circle(582,294,44,false);
-draw_set_color(c_white); draw_set_alpha(0.86);
-draw_text(482,274,"JUMP"); draw_text(482,292,"X");
-draw_text(582,289,"ATK"); draw_text(582,307,"C");
+draw_sprite_ext(spr_x_button,keyboard_check(ord("X")),440,224,3.15,3.15,0,c_white,0.58);
+draw_sprite_ext(spr_c_button,keyboard_check(ord("C")),536,246,3.15,3.15,0,c_white,0.58);
+draw_text_colour(480,326,"JUMP",c_white,c_white,c_white,c_white,0.82);
+draw_text_colour(580,342,"ATK",c_white,c_white,c_white,c_white,0.82);
 
-draw_set_color(c_black);
-draw_set_alpha(keyboard_check(vk_space)?0.58:0.30); draw_rectangle(190,10,262,42,false);
-draw_set_alpha((keyboard_check(vk_lcontrol)&&keyboard_check(vk_insert))?0.58:0.30); draw_rectangle(274,10,350,42,false);
-draw_set_alpha(keyboard_check(vk_escape)?0.58:0.30); draw_rectangle(454,10,532,42,false);
-draw_set_alpha(keyboard_check(vk_enter)?0.58:0.30); draw_rectangle(540,10,626,42,false);
-draw_set_color(c_white); draw_set_alpha(0.78);
-draw_text(226,26,"MODE"); draw_text(312,26,"LANG"); draw_text(493,26,"BACK"); draw_text(583,26,"MENU");
+draw_text_colour(226,26,"MODE",c_white,c_white,c_white,c_white,keyboard_check(vk_space)?1:0.58);
+draw_text_colour(312,26,"LANG",c_white,c_white,c_white,c_white,(keyboard_check(vk_lcontrol)&&keyboard_check(vk_insert))?1:0.58);
+draw_text_colour(493,26,"BACK",c_white,c_white,c_white,c_white,keyboard_check(vk_escape)?1:0.58);
+draw_text_colour(583,26,"MENU",c_white,c_white,c_white,c_white,keyboard_check(vk_enter)?1:0.58);
 
-draw_set_font(old_font); draw_set_halign(old_halign); draw_set_valign(old_valign);
-draw_set_color(old_color); draw_set_alpha(old_alpha);
+draw_set_font(-1);
+draw_set_halign(fa_left);
 """;
 
             var cleanup = """
