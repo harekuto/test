@@ -1,0 +1,829 @@
+name: Super Monsters Girls Android Port Final
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/super-monsters-girls-android-final.yml'
+
+env:
+  DRIVE_ID: 1P5tBahadA9hu2EH21632YGrFC25ewFaN
+  PACKAGE_NAME: com.harekuto.supermonstersgirls
+  APP_NAME: "Super Monsters'n Girls"
+  VERSION_NAME: 2.0.2-android-v1.1
+  MOBILER_COMMIT: 6a23adc1d4e71c238456568df18f85cc7b44caa9
+  PYTHONUTF8: '1'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    outputs:
+      emulator_arch: ${{ steps.abi.outputs.emulator_arch }}
+      apk_name: ${{ steps.names.outputs.apk_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Python helpers
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install gdown pillow
+
+      - name: Download original game
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work | Out-Null
+          gdown $env:DRIVE_ID -O work/original_game.zip
+          if (!(Test-Path work/original_game.zip)) { throw "Game download failed" }
+          $hash=(Get-FileHash work/original_game.zip -Algorithm SHA256).Hash.ToLower()
+          "ORIGINAL_SHA256=$hash" | Tee-Object work/original-sha256.txt
+          7z x -y work/original_game.zip -owork/game | Out-Null
+          $data=Get-ChildItem work/game -Recurse -Filter *.win | Select-Object -First 1
+          if (!$data) { throw "data.win/.win not found" }
+          "DATA_WIN=$($data.FullName)" | Out-File -Append $env:GITHUB_ENV
+          "GAME_DIR=$($data.DirectoryName)" | Out-File -Append $env:GITHUB_ENV
+          Get-ChildItem $data.DirectoryName | Format-Table Name,Length
+
+      - name: Fetch pinned port tools
+        shell: pwsh
+        run: |
+          git clone https://github.com/znm2500/GameMaker-Mobiler.git work/mobiler
+          Push-Location work/mobiler
+          git checkout $env:MOBILER_COMMIT
+          Pop-Location
+          Invoke-WebRequest -Uri "https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.2.0/UTMT_CLI_v0.9.2.0-Windows.zip" -OutFile work/utmt.zip
+          Expand-Archive work/utmt.zip -DestinationPath work/utmt -Force
+          $cli=Get-ChildItem work/utmt -Recurse -Filter UndertaleModCli.exe | Select-Object -First 1
+          if (!$cli) { throw "UndertaleModCli.exe not found" }
+          "UTMT_CLI=$($cli.FullName)" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Detect exact GameMaker version
+        shell: pwsh
+        run: |
+          @'
+          ScriptMessage($"GM_EXACT={Data.GeneralInfo.Major}.{Data.GeneralInfo.Minor}.{Data.GeneralInfo.Release}.{Data.GeneralInfo.Build};BC={Data.GeneralInfo.BytecodeVersion};YYC={Data.IsYYC()}");
+          '@ | Set-Content work/version.csx -Encoding UTF8
+          & "$env:UTMT_CLI" load "$env:DATA_WIN" -s work/version.csx -v 2>&1 | Tee-Object work/version-run.txt
+          $line=Select-String -Path work/version-run.txt -Pattern 'GM_EXACT=' | Select-Object -First 1
+          if (!$line) { throw "Could not determine exact GameMaker version" }
+          $v=[regex]::Match($line.Line,'GM_EXACT=([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+);BC=([0-9]+);YYC=(True|False)')
+          if (!$v.Success) { throw "Unparseable GameMaker version: $($line.Line)" }
+          $major=[int]$v.Groups[1].Value
+          $minor=[int]$v.Groups[2].Value
+          $release=[int]$v.Groups[3].Value
+          $build=[int]$v.Groups[4].Value
+          $bc=[int]$v.Groups[5].Value
+          $yyc=$v.Groups[6].Value
+          if ($yyc -ne 'False') { throw "YYC Windows build cannot be safely reused as Android VM bytecode" }
+          "GM_MAJOR=$major" | Out-File -Append $env:GITHUB_ENV
+          "GM_MINOR=$minor" | Out-File -Append $env:GITHUB_ENV
+          "GM_RELEASE=$release" | Out-File -Append $env:GITHUB_ENV
+          "GM_BUILD=$build" | Out-File -Append $env:GITHUB_ENV
+          "GM_BYTECODE=$bc" | Out-File -Append $env:GITHUB_ENV
+          Write-Host "Exact GameMaker: $major.$minor.$release.$build bytecode=$bc VM"
+
+      - name: Select closest compatible Android runner
+        shell: pwsh
+        run: |
+          $dir=Join-Path $PWD 'work/mobiler/GMS2 APK'
+          $templates=Get-ChildItem $dir -Filter *.apk
+          $major=[int]$env:GM_MAJOR
+          $minor=[int]$env:GM_MINOR
+          $release=[int]$env:GM_RELEASE
+          $parsed=@()
+          foreach($t in $templates){
+            $parts=$t.BaseName.Split('.')
+            if($parts.Count -ge 2){
+              $a=[int]$parts[0]; $b=[int]$parts[1]; $c=if($parts.Count -ge 3){[int]$parts[2]}else{0}
+              $parsed += [pscustomobject]@{File=$t.FullName;Name=$t.Name;Major=$a;Minor=$b;Revision=$c}
+            }
+          }
+          $same=$parsed | Where-Object {$_.Major -eq $major} | Sort-Object Minor,Revision
+          if(!$same){ $sel=$parsed | Sort-Object Major,Minor,Revision -Descending | Select-Object -First 1 }
+          elseif($major -lt 2022){
+            $exactMinor=$same | Where-Object {$_.Minor -eq $minor} | Sort-Object Revision -Descending
+            if($exactMinor){ $sel=$exactMinor | Select-Object -First 1 }
+            else {
+              $forward=$same | Where-Object {$_.Minor -gt $minor} | Sort-Object Minor,Revision | Select-Object -First 1
+              $sel=if($forward){$forward}else{$same | Sort-Object Minor,Revision -Descending | Select-Object -First 1}
+            }
+          } else {
+            $exact=$same | Where-Object {$_.Minor -eq $minor} | Select-Object -First 1
+            if($exact){$sel=$exact}else{
+              $forward=$same | Where-Object {$_.Minor -gt $minor} | Sort-Object Minor | Select-Object -First 1
+              $sel=if($forward){$forward}else{$same | Sort-Object Minor -Descending | Select-Object -First 1}
+            }
+          }
+          if(!$sel){throw "No runner template selected"}
+          "TEMPLATE_APK=$($sel.File)" | Out-File -Append $env:GITHUB_ENV
+          "TEMPLATE_NAME=$($sel.Name)" | Out-File -Append $env:GITHUB_ENV
+          "Selected runner template: $($sel.Name)"
+
+      - name: Tailor mobile controls to this game
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          root=Path("work/mobiler")
+          files=list(root.rglob("*"))
+
+          def one(name, contains=None):
+              xs=[p for p in files if p.name==name and (contains is None or contains in str(p).replace("\\","/"))]
+              if len(xs)!=1:
+                  raise SystemExit(f"Expected one {name}, got {len(xs)}: {xs}")
+              return xs[0]
+
+          mb=one("gml_Object_mb_cont_mobile_Create_0.gml","mobilecont")
+          s=mb.read_text(encoding="utf-8-sig")
+          s=s.replace("global.mobile_cn = 1;", "global.mobile_cn = 0;")
+          s=s.replace("global.mobile_prioritize_display = 0;", "global.mobile_prioritize_display = 1;")
+          s=s.replace("global.add_mobilekey = 1;", "global.add_mobilekey = 0;")
+          s=s.replace('global.ui_state = ini_read_real("UI", "state", 1);',
+                      'global.ui_state = ini_read_real("UI", "state", 4);')
+          mb.write_text(s,encoding="utf-8")
+
+          create=one("gml_Object_obj_mobilecontrols_button_Create_0.gml","TouchControls_data_button")
+          s=create.read_text(encoding="utf-8-sig")
+          marker="active_key = -1;"
+          add=r'''
+          // Super Monsters'n Girls: responsive menu/start buttons.
+          var _smg_gui_w = display_get_gui_width();
+          var _smg_gui_h = display_get_gui_height();
+          if (_smg_gui_w <= 0) _smg_gui_w = 640;
+          if (_smg_gui_h <= 0) _smg_gui_h = 480;
+          smg_enter_w = 72;
+          smg_enter_h = 36;
+          smg_enter_x = _smg_gui_w - smg_enter_w - 16;
+          smg_enter_y = 14;
+          smg_escape_w = 72;
+          smg_escape_h = 36;
+          smg_escape_x = _smg_gui_w - smg_enter_w - smg_escape_w - 28;
+          smg_escape_y = 14;
+          '''
+          if "smg_enter_x" not in s:
+              s=s.replace(marker,marker+"\n"+add)
+          create.write_text(s,encoding="utf-8")
+
+          other=one("gml_Object_obj_mobilecontrols_button_Other_4.gml","TouchControls_data_button")
+          s=other.read_text(encoding="utf-8-sig")
+          needle='virtual_key_settings = virtual_key_add(-50, 5, 38, 50, 92);'
+          add=r'''
+              // Native virtual keys used by the game's real input code.
+              virtual_key_smg_enter = virtual_key_add(smg_enter_x, smg_enter_y, smg_enter_w, smg_enter_h, 13);
+              virtual_key_smg_escape = virtual_key_add(smg_escape_x, smg_escape_y, smg_escape_w, smg_escape_h, 27);
+          '''
+          if "virtual_key_smg_enter" not in s:
+              s=s.replace(needle,needle+"\n"+add)
+          other.write_text(s,encoding="utf-8")
+
+          cleanup=one("gml_Object_obj_mobilecontrols_button_CleanUp_0.gml","TouchControls_data_button")
+          s=cleanup.read_text(encoding="utf-8-sig")
+          if "virtual_key_smg_enter" not in s:
+              s += "\nvirtual_key_delete(virtual_key_smg_enter);\nvirtual_key_delete(virtual_key_smg_escape);\n"
+          cleanup.write_text(s,encoding="utf-8")
+
+          step=one("gml_Object_obj_mobilecontrols_button_Step_0.gml","TouchControls_data_button")
+          s=step.read_text(encoding="utf-8-sig")
+          if "virtual_key_smg_enter" not in s:
+              s=s.replace("virtual_key_delete(virtual_key_c);",
+                          "virtual_key_delete(virtual_key_c);\nvirtual_key_delete(virtual_key_smg_enter);\nvirtual_key_delete(virtual_key_smg_escape);")
+          step.write_text(s,encoding="utf-8")
+
+          draw=one("gml_Object_obj_mobilecontrols_button_Draw_75.gml","TouchControls_data_button")
+          s=draw.read_text(encoding="utf-8-sig")
+          needle='draw_sprite_ext(spr_c_button, keyboard_check(ord("C")), (global.dual_controls == 1) ? cx2 : cx, (global.dual_controls == 1) ? cy2 : cy, button_scale, button_scale, 0, button_colour, controls_opacity * image_alpha);'
+          add=r'''
+          // Clear action labels for this game's actual controls.
+          var _smg_font = draw_get_font();
+          var _smg_halign = draw_get_halign();
+          var _smg_valign = draw_get_valign();
+          var _smg_colour = draw_get_color();
+          var _smg_alpha = draw_get_alpha();
+          draw_set_font(settings_font);
+          draw_set_halign(fa_center);
+          draw_set_valign(fa_middle);
+
+          draw_set_alpha(controls_opacity * image_alpha);
+          draw_set_color(keyboard_check(vk_enter) ? c_lime : c_black);
+          draw_rectangle(smg_enter_x, smg_enter_y, smg_enter_x + smg_enter_w, smg_enter_y + smg_enter_h, false);
+          draw_set_color(c_white);
+          draw_text(smg_enter_x + smg_enter_w * 0.5, smg_enter_y + smg_enter_h * 0.5, "ENTER");
+
+          draw_set_color(keyboard_check(vk_escape) ? c_lime : c_black);
+          draw_rectangle(smg_escape_x, smg_escape_y, smg_escape_x + smg_escape_w, smg_escape_y + smg_escape_h, false);
+          draw_set_color(c_white);
+          draw_text(smg_escape_x + smg_escape_w * 0.5, smg_escape_y + smg_escape_h * 0.5, "MENU");
+
+          draw_set_alpha(max(0.25, controls_opacity * image_alpha));
+          draw_text(((global.dual_controls == 1) ? zx2 : zx) + 40, ((global.dual_controls == 1) ? zy2 : zy) - 8, "ATK");
+          draw_text(((global.dual_controls == 1) ? xx2 : xx) + 40, ((global.dual_controls == 1) ? xy2 : xy) - 8, "JUMP");
+          draw_text(((global.dual_controls == 1) ? cx2 : cx) + 40, ((global.dual_controls == 1) ? cy2 : cy) - 8, "C");
+
+          draw_set_alpha(_smg_alpha);
+          draw_set_color(_smg_colour);
+          draw_set_halign(_smg_halign);
+          draw_set_valign(_smg_valign);
+          draw_set_font(_smg_font);
+          '''
+          if "Clear action labels" not in s:
+              s=s.replace(needle,needle+"\n"+add)
+          draw.write_text(s,encoding="utf-8")
+
+          # GameMaker 2.2.2 compatibility: these state getter functions were
+          # introduced after this game's runtime. Preserve behavior with known defaults.
+          for p in root.rglob("*Draw_75.gml"):
+              try:
+                  t=p.read_text(encoding="utf-8-sig")
+              except Exception:
+                  continue
+              u=(t.replace("draw_get_font()", "-1")
+                    .replace("draw_get_halign()", "fa_left")
+                    .replace("draw_get_valign()", "fa_top"))
+              if u != t:
+                  p.write_text(u,encoding="utf-8")
+                  print("GM222_COMPAT", p)
+
+          checks={
+              mb:["global.ui_state = ini_read_real(\"UI\", \"state\", 4);"],
+              create:["smg_enter_x","smg_escape_x"],
+              other:["virtual_key_smg_enter","virtual_key_smg_escape"],
+              cleanup:["virtual_key_smg_enter"],
+              step:["virtual_key_smg_escape"],
+              draw:['"ENTER"','"MENU"','"ATK"','"JUMP"'],
+          }
+          for p,needles in checks.items():
+              txt=p.read_text(encoding="utf-8")
+              for n in needles:
+                  if n not in txt:
+                      raise SystemExit(f"Patch validation failed: {p} missing {n}")
+              print("PATCHED",p)
+          '@ | Set-Content work/patch_mobile.py -Encoding UTF8
+          python work/patch_mobile.py
+
+      - name: Inject mobile GML controls
+        shell: pwsh
+        run: |
+          $script=Get-ChildItem work/mobiler -Recurse -Filter "Mobile集成脚本.csx" | Select-Object -First 1
+          if(!$script){throw "Mobile integration script not found"}
+          $out=Join-Path $env:GAME_DIR 'data_mobile.win'
+          & "$env:UTMT_CLI" load "$env:DATA_WIN" -s "$($script.FullName)" -o "$out" -f -v 2>&1 | Tee-Object work/mobile-injection.log
+          if($LASTEXITCODE -ne 0){throw "Mobile integration failed"}
+          if(!(Test-Path $out)){throw "Modified data file missing"}
+          "MOBILE_WIN=$out" | Out-File -Append $env:GITHUB_ENV
+          & "$env:UTMT_CLI" info "$out" -v 2>&1 | Tee-Object work/mobile-info.txt
+
+      - name: Verify injected controls by decompiling modified data
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work/verify-gml | Out-Null
+          & "$env:UTMT_CLI" dump "$env:MOBILE_WIN" -c UMT_DUMP_ALL -o work/verify-gml 2>&1 | Tee-Object work/verify-dump.log
+          $all=Get-ChildItem work/verify-gml -Recurse -Filter *.gml
+          $enter=$all | Select-String -Pattern 'virtual_key_smg_enter|virtual_key_add\([^\r\n]*13\)'
+          $escape=$all | Select-String -Pattern 'virtual_key_smg_escape|virtual_key_add\([^\r\n]*27\)'
+          $attack=$all | Select-String -Pattern '"ATK"|ord\("Z"\)'
+          $jump=$all | Select-String -Pattern '"JUMP"|ord\("X"\)'
+          if(!$enter){throw "ENTER mobile key not present after compile"}
+          if(!$escape){throw "ESC mobile key not present after compile"}
+          if(!$attack){throw "Attack mapping missing"}
+          if(!$jump){throw "Jump mapping missing"}
+          "ENTER_MATCHES=$($enter.Count) ESC_MATCHES=$($escape.Count) ATK_MATCHES=$($attack.Count) JUMP_MATCHES=$($jump.Count)" | Tee-Object work/control-verification.txt
+
+      - name: Extract original Windows icon
+        shell: pwsh
+        run: |
+          try {
+            Add-Type -AssemblyName System.Drawing
+            $exe=Get-ChildItem "$env:GAME_DIR" -Filter *.exe | Select-Object -First 1
+            if($exe){
+              $icon=[System.Drawing.Icon]::ExtractAssociatedIcon($exe.FullName)
+              if($icon){
+                $bmp=$icon.ToBitmap()
+                $bmp.Save((Join-Path $PWD 'work/game-icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+                $bmp.Dispose(); $icon.Dispose()
+              }
+            }
+          } catch { Write-Warning "Icon extraction failed: $_" }
+
+      - name: Decode Android runner template
+        shell: pwsh
+        run: |
+          $apktool=Get-ChildItem work/mobiler -Recurse -Filter "apktool_3.0.3.jar" | Select-Object -First 1
+          if(!$apktool){throw "apktool jar not found"}
+          "APKTOOL=$($apktool.FullName)" | Out-File -Append $env:GITHUB_ENV
+          java -jar "$($apktool.FullName)" d -f -o work/apkdecoded "$env:TEMPLATE_APK"
+          if($LASTEXITCODE -ne 0){throw "apktool decode failed"}
+
+      - name: Patch Android package metadata and icon
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import re, os
+          from PIL import Image
+
+          root=Path("work/apkdecoded")
+          manifest=root/"AndroidManifest.xml"
+          s=manifest.read_text(encoding="utf-8")
+          m=re.search(r'\bpackage\s*=\s*["\']([^"\']+)["\']',s)
+          if not m: raise SystemExit("manifest package missing")
+          old=m.group(1)
+          new=os.environ["PACKAGE_NAME"]
+          app=os.environ["APP_NAME"]
+          version=os.environ["VERSION_NAME"]
+          print("old package",old,"new",new)
+
+          oldslash=old.replace(".","/")
+          newslash=new.replace(".","/")
+          for p in root.rglob("*"):
+              if p.is_file() and (p.suffix.lower() in {".xml",".smali",".yml",".txt",".properties"}):
+                  try: t=p.read_text(encoding="utf-8")
+                  except: continue
+                  u=t.replace(old,new).replace(oldslash,newslash)
+                  if u!=t: p.write_text(u,encoding="utf-8")
+
+          s=manifest.read_text(encoding="utf-8")
+          s=re.sub(r'(android:versionName\s*=\s*["\'])[^"\']*(["\'])',r'\g<1>'+version+r'\2',s)
+          if re.search(r'android:versionCode\s*=',s):
+              s=re.sub(r'(android:versionCode\s*=\s*["\'])[^"\']*(["\'])',r'\g<1>1\2',s)
+          s=re.sub(r'android:screenOrientation\s*=\s*["\'][^"\']*["\']','android:screenOrientation="sensorLandscape"',s)
+          if 'android:largeHeap=' not in s:
+              s=s.replace('<application ','<application android:largeHeap="true" ',1)
+          manifest.write_text(s,encoding="utf-8")
+
+          for p in root.rglob("strings.xml"):
+              try: t=p.read_text(encoding="utf-8")
+              except: continue
+              if 'name="app_name"' in t:
+                  android_app_name=app.replace("'", "\\'")
+                  t=re.sub(r'(<string[^>]+name="app_name"[^>]*>).*?(</string>)',lambda m:m.group(1)+android_app_name+m.group(2),t,flags=re.S)
+                  p.write_text(t,encoding="utf-8")
+
+          icon=Path("work/game-icon.png")
+          if icon.exists():
+              src=Image.open(icon).convert("RGBA")
+              replaced=0
+              for p in root.rglob("*.png"):
+                  low=str(p).replace("\\","/").lower()
+                  if "/mipmap" in low and ("icon" in p.stem.lower() or "launcher" in p.stem.lower()):
+                      try:
+                          oldimg=Image.open(p)
+                          size=oldimg.size
+                          oldimg.close()
+                          src.resize(size,Image.Resampling.LANCZOS).save(p)
+                          replaced+=1
+                      except: pass
+              print("launcher icons replaced",replaced)
+          '@ | Set-Content work/patch_apk.py -Encoding UTF8
+          python work/patch_apk.py
+
+      - name: Inject game.droid and external audio groups
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work/apkdecoded/assets | Out-Null
+          Remove-Item work/apkdecoded/assets/game.droid -Force -ErrorAction SilentlyContinue
+          Copy-Item "$env:MOBILE_WIN" work/apkdecoded/assets/game.droid -Force
+          Get-ChildItem "$env:GAME_DIR" -Filter "audiogroup*.dat" | ForEach-Object {
+            Copy-Item $_.FullName (Join-Path 'work/apkdecoded/assets' $_.Name) -Force
+          }
+          $groups=Get-ChildItem work/apkdecoded/assets -Filter "audiogroup*.dat"
+          if($groups.Count -lt 3){throw "Expected 3 external audiogroups, found $($groups.Count)"}
+          Get-Item work/apkdecoded/assets/game.droid | Format-Table Name,Length
+          $groups | Format-Table Name,Length
+
+      - name: Rebuild Android APK
+        shell: pwsh
+        run: |
+          java -Xmx6g -jar "$env:APKTOOL" b -f --no-crunch -o work/unsigned.apk work/apkdecoded
+          if($LASTEXITCODE -ne 0){throw "apktool build failed"}
+          if(!(Test-Path work/unsigned.apk)){throw "unsigned APK missing"}
+
+      - name: Align and sign APK
+        id: names
+        shell: pwsh
+        run: |
+          $bt=Get-ChildItem "$env:ANDROID_HOME/build-tools" -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+          $zipalign=Join-Path $bt.FullName 'zipalign.exe'
+          $apksigner=Join-Path $bt.FullName 'apksigner.bat'
+          $aapt=Join-Path $bt.FullName 'aapt.exe'
+          if(!(Test-Path $zipalign) -or !(Test-Path $apksigner)){throw "Android build tools missing"}
+          & keytool -genkeypair -v -keystore work/port.keystore -storepass android -keypass android -alias port -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Harekuto Android Port,O=Harekuto,C=KZ"
+          & $zipalign -f -p 4 work/unsigned.apk work/aligned.apk
+          $apkName="Super-Monsters-n-Girls-v2.0.2-Android-v1.apk"
+          & $apksigner sign --ks work/port.keystore --ks-key-alias port --ks-pass pass:android --key-pass pass:android --out "work/$apkName" work/aligned.apk
+          & $apksigner verify --verbose --print-certs "work/$apkName" | Tee-Object work/signature.txt
+          & $aapt dump badging "work/$apkName" | Tee-Object work/aapt-badging.txt
+          & $zipalign -c -v 4 "work/$apkName" | Tee-Object work/zipalign-check.txt
+          "apk_name=$apkName" >> $env:GITHUB_OUTPUT
+          "FINAL_APK=$((Resolve-Path "work/$apkName").Path)" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Deep verify final APK contents
+        shell: pwsh
+        run: |
+          7z t "$env:FINAL_APK" | Tee-Object work/apk-zip-test.txt
+          7z l "$env:FINAL_APK" | Tee-Object work/apk-list.txt
+          $apkList = Get-Content work/apk-list.txt -Raw
+          if(!$apkList.Contains("assets\game.droid")){throw "APK lacks game.droid"}
+          foreach($n in 1..3){
+            if(!$apkList.Contains("audiogroup$n.dat")){throw "APK lacks audiogroup$n.dat"}
+          }
+          if($apkList -match '(?im)\.exe\s*
+          New-Item -ItemType Directory -Force work/apkextract | Out-Null
+          Push-Location work/apkextract
+          7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
+          Pop-Location
+          & "$env:UTMT_CLI" info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+          $hash=(Get-FileHash "$env:FINAL_APK" -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item "$env:FINAL_APK").Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "RUNNER_TEMPLATE=$env:TEMPLATE_NAME" | Tee-Object -Append work/final-hash.txt
+          "GM_VERSION=$env:GM_MAJOR.$env:GM_MINOR.$env:GM_RELEASE.$env:GM_BUILD BYTECODE=$env:GM_BYTECODE VM" | Tee-Object -Append work/final-hash.txt
+
+      - name: Detect emulator-compatible ABI
+        id: abi
+        shell: pwsh
+        run: |
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -match 'lib\\x86_64\\libyoyo\.so'){
+            "emulator_arch=x86_64" >> $env:GITHUB_OUTPUT
+          } elseif($list -match 'lib\\x86\\libyoyo\.so'){
+            "emulator_arch=x86" >> $env:GITHUB_OUTPUT
+          } else {
+            "emulator_arch=none" >> $env:GITHUB_OUTPUT
+          }
+          Select-String work/apk-list.txt -Pattern 'lib.yoyo\.so' | Tee-Object work/abis.txt
+
+      - name: Upload final APK for smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: ${{ env.FINAL_APK }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload QA diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-port-qa
+          path: |
+            work/original-sha256.txt
+            work/version-run.txt
+            work/mobile-injection.log
+            work/mobile-info.txt
+            work/control-verification.txt
+            work/aapt-badging.txt
+            work/signature.txt
+            work/zipalign-check.txt
+            work/apk-zip-test.txt
+            work/final-game-info.txt
+            work/final-hash.txt
+            work/abis.txt
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: super-monsters-girls-android-v1-1
+          name: "Super Monsters'n Girls v2.0.2 Android v1.1"
+          body: |
+            Unofficial Android port generated from the user-provided Windows GameMaker VM build.
+            Touch controls: D-pad, Attack (Z/C), Jump (X), Enter/Start and Menu/Escape.
+            Build includes the original external audiogroups and a version-matched GameMaker Android runner.
+          files: ${{ env.FINAL_APK }}
+          overwrite_files: true
+
+  smoke:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.emulator_arch != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+
+      - name: Choose emulator API
+        id: emu
+        shell: bash
+        run: |
+          if [ "${{ needs.build.outputs.emulator_arch }}" = "x86_64" ]; then
+            echo "api=35" >> "$GITHUB_OUTPUT"
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=29" >> "$GITHUB_OUTPUT"
+            echo "arch=x86" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Android smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: ${{ steps.emu.outputs.api }}
+          arch: ${{ steps.emu.outputs.arch }}
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            APK="$(find apk -name '*.apk' | head -1)"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 18
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            if ! adb shell pidof "$TEST_PACKAGE" >/dev/null; then
+              adb logcat -d | tail -500 > smoke-log.txt
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb logcat -d | tail -1000 > smoke-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            echo "SMOKE_OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: super-monsters-girls-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
+){throw "Windows executable leaked into APK"}
+          if($apkList -match '(?im)\.dll\s*
+          New-Item -ItemType Directory -Force work/apkextract | Out-Null
+          Push-Location work/apkextract
+          7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
+          Pop-Location
+          & "$env:UTMT_CLI" info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+          $hash=(Get-FileHash "$env:FINAL_APK" -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item "$env:FINAL_APK").Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "RUNNER_TEMPLATE=$env:TEMPLATE_NAME" | Tee-Object -Append work/final-hash.txt
+          "GM_VERSION=$env:GM_MAJOR.$env:GM_MINOR.$env:GM_RELEASE.$env:GM_BUILD BYTECODE=$env:GM_BYTECODE VM" | Tee-Object -Append work/final-hash.txt
+
+      - name: Detect emulator-compatible ABI
+        id: abi
+        shell: pwsh
+        run: |
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -match 'lib\\x86_64\\libyoyo\.so'){
+            "emulator_arch=x86_64" >> $env:GITHUB_OUTPUT
+          } elseif($list -match 'lib\\x86\\libyoyo\.so'){
+            "emulator_arch=x86" >> $env:GITHUB_OUTPUT
+          } else {
+            "emulator_arch=none" >> $env:GITHUB_OUTPUT
+          }
+          Select-String work/apk-list.txt -Pattern 'lib.yoyo\.so' | Tee-Object work/abis.txt
+
+      - name: Upload final APK for smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: ${{ env.FINAL_APK }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload QA diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-port-qa
+          path: |
+            work/original-sha256.txt
+            work/version-run.txt
+            work/mobile-injection.log
+            work/mobile-info.txt
+            work/control-verification.txt
+            work/aapt-badging.txt
+            work/signature.txt
+            work/zipalign-check.txt
+            work/apk-zip-test.txt
+            work/final-game-info.txt
+            work/final-hash.txt
+            work/abis.txt
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: super-monsters-girls-android-v1
+          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          body: |
+            Unofficial Android port generated from the user-provided Windows GameMaker VM build.
+            Touch controls: D-pad, Attack (Z/C), Jump (X), Enter/Start and Menu/Escape.
+            Build includes the original external audiogroups and a version-matched GameMaker Android runner.
+          files: ${{ env.FINAL_APK }}
+          overwrite_files: true
+
+  smoke:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.emulator_arch != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+
+      - name: Choose emulator API
+        id: emu
+        shell: bash
+        run: |
+          if [ "${{ needs.build.outputs.emulator_arch }}" = "x86_64" ]; then
+            echo "api=35" >> "$GITHUB_OUTPUT"
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=29" >> "$GITHUB_OUTPUT"
+            echo "arch=x86" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Android smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: ${{ steps.emu.outputs.api }}
+          arch: ${{ steps.emu.outputs.arch }}
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            APK="$(find apk -name '*.apk' | head -1)"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 18
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            if ! adb shell pidof "$TEST_PACKAGE" >/dev/null; then
+              adb logcat -d | tail -500 > smoke-log.txt
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb logcat -d | tail -1000 > smoke-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            echo "SMOKE_OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: super-monsters-girls-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
+){throw "Windows DLL leaked into APK"}
+          New-Item -ItemType Directory -Force work/apkextract | Out-Null
+          Push-Location work/apkextract
+          7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
+          Pop-Location
+          & "$env:UTMT_CLI" info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+          $hash=(Get-FileHash "$env:FINAL_APK" -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item "$env:FINAL_APK").Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "RUNNER_TEMPLATE=$env:TEMPLATE_NAME" | Tee-Object -Append work/final-hash.txt
+          "GM_VERSION=$env:GM_MAJOR.$env:GM_MINOR.$env:GM_RELEASE.$env:GM_BUILD BYTECODE=$env:GM_BYTECODE VM" | Tee-Object -Append work/final-hash.txt
+
+      - name: Detect emulator-compatible ABI
+        id: abi
+        shell: pwsh
+        run: |
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -match 'lib\\x86_64\\libyoyo\.so'){
+            "emulator_arch=x86_64" >> $env:GITHUB_OUTPUT
+          } elseif($list -match 'lib\\x86\\libyoyo\.so'){
+            "emulator_arch=x86" >> $env:GITHUB_OUTPUT
+          } else {
+            "emulator_arch=none" >> $env:GITHUB_OUTPUT
+          }
+          Select-String work/apk-list.txt -Pattern 'lib.yoyo\.so' | Tee-Object work/abis.txt
+
+      - name: Upload final APK for smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: ${{ env.FINAL_APK }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload QA diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-port-qa
+          path: |
+            work/original-sha256.txt
+            work/version-run.txt
+            work/mobile-injection.log
+            work/mobile-info.txt
+            work/control-verification.txt
+            work/aapt-badging.txt
+            work/signature.txt
+            work/zipalign-check.txt
+            work/apk-zip-test.txt
+            work/final-game-info.txt
+            work/final-hash.txt
+            work/abis.txt
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: super-monsters-girls-android-v1
+          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          body: |
+            Unofficial Android port generated from the user-provided Windows GameMaker VM build.
+            Touch controls: D-pad, Attack (Z/C), Jump (X), Enter/Start and Menu/Escape.
+            Build includes the original external audiogroups and a version-matched GameMaker Android runner.
+          files: ${{ env.FINAL_APK }}
+          overwrite_files: true
+
+  smoke:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.emulator_arch != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+
+      - name: Choose emulator API
+        id: emu
+        shell: bash
+        run: |
+          if [ "${{ needs.build.outputs.emulator_arch }}" = "x86_64" ]; then
+            echo "api=35" >> "$GITHUB_OUTPUT"
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=29" >> "$GITHUB_OUTPUT"
+            echo "arch=x86" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Android smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: ${{ steps.emu.outputs.api }}
+          arch: ${{ steps.emu.outputs.arch }}
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            APK="$(find apk -name '*.apk' | head -1)"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 18
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            if ! adb shell pidof "$TEST_PACKAGE" >/dev/null; then
+              adb logcat -d | tail -500 > smoke-log.txt
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb logcat -d | tail -1000 > smoke-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            echo "SMOKE_OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: super-monsters-girls-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
