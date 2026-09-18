@@ -4,6 +4,12 @@ Set-StrictMode -Version Latest
 $final = $env:FINAL_APK
 if (!(Test-Path $final)) { throw 'Final APK missing' }
 
+$badging = Get-Content work/aapt-badging.txt -Raw
+if ($badging -notmatch "name='com\.harekuto\.supermonstersgirls'") { throw 'Final APK package mismatch' }
+if ($badging -notmatch "versionCode='102'") { throw 'Final APK versionCode mismatch' }
+if ($badging -notmatch "versionName='2\.0\.2-android-v1\.2'") { throw 'Final APK versionName mismatch' }
+
+
 7z t $final | Tee-Object work/apk-zip-test.txt
 if ($LASTEXITCODE -ne 0) { throw 'APK ZIP integrity test failed' }
 
