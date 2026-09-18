@@ -1,5 +1,8 @@
 name: SMG Android Final Build
-# Trigger revision 1
+# Trigger revision 2
+
+permissions:
+  contents: write
 
 on:
   workflow_dispatch:
@@ -68,3 +71,14 @@ jobs:
             work/final-game-info.txt
             work/final-hash.txt
           retention-days: 30
+
+      - name: Publish APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: smg-android-v1-final
+          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          body: |
+            Android port built from the supplied GameMaker 2.2.2.302 VM release.
+            Touch controls: movement, Attack, Jump, Enter/Start, Menu/Escape.
+          files: dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.apk
+          overwrite_files: true
