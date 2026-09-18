@@ -4,6 +4,10 @@ name: SMG Android Final Build
 permissions:
   contents: write
 
+concurrency:
+  group: smg-android-final
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
