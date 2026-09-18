@@ -1,0 +1,25 @@
+name: Musor Forge 1.20.1 Tools
+
+on:
+  push:
+    paths:
+      - '.github/workflows/musor-forge-tools.yml'
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Forge remap tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          curl -fL --retry 3             https://maven.minecraftforge.net/net/minecraftforge/ForgeAutoRenamingTool/1.0.2/ForgeAutoRenamingTool-1.0.2-all.jar             -o out/ForgeAutoRenamingTool-1.0.2-all.jar
+          curl -fL --retry 3             https://maven.minecraftforge.net/net/minecraftforge/mappings_official/1.20.1-20230612.114412/mappings_official-1.20.1-20230612.114412-map2srg.tsrg.gz             -o out/mappings_official-1.20.1-20230612.114412-map2srg.tsrg.gz
+          sha256sum out/* | tee out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: musor-forge-1.20.1-tools
+          path: out/
+          if-no-files-found: error
