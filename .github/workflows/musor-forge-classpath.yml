@@ -1,0 +1,88 @@
+name: Musor Forge 1.20.1 Classpath
+
+on:
+  push:
+    paths:
+      - '.github/workflows/musor-forge-classpath.yml'
+  workflow_dispatch:
+
+jobs:
+  classpath:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: Create Forge 1.20.1 probe project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p probe/src/main/java/probe
+          cat > probe/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  gradlePluginPortal()
+                  maven { url = 'https://maven.minecraftforge.net/' }
+              }
+          }
+          rootProject.name = 'musor-classpath-probe'
+          EOF
+          cat > probe/build.gradle <<'EOF'
+          plugins {
+              id 'java'
+              id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+          }
+
+          group = 'probe'
+          version = '1.0'
+
+          java {
+              toolchain.languageVersion = JavaLanguageVersion.of(17)
+          }
+
+          minecraft {
+              mappings channel: 'official', version: '1.20.1'
+          }
+
+          repositories {
+              mavenCentral()
+          }
+
+          dependencies {
+              minecraft 'net.minecraftforge:forge:1.20.1-47.4.10'
+          }
+
+          tasks.register('copyCompileClasspath', Copy) {
+              from configurations.compileClasspath
+              into layout.buildDirectory.dir('musor-classpath')
+              duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+          }
+
+          tasks.register('writeClasspath') {
+              doLast {
+                  def f = layout.buildDirectory.file('musor-classpath.txt').get().asFile
+                  f.parentFile.mkdirs()
+                  f.text = configurations.compileClasspath.files.collect { it.absolutePath }.sort().join('\n')
+              }
+          }
+          EOF
+          cat > probe/src/main/java/probe/Probe.java <<'EOF'
+          package probe;
+          public final class Probe {}
+          EOF
+
+      - name: Resolve exact Forge compile classpath
+        working-directory: probe
+        run: |
+          gradle --no-daemon --stacktrace copyCompileClasspath writeClasspath
+          find build/musor-classpath -type f -maxdepth 1 -printf '%f %s bytes\n' | sort
+          sha256sum build/musor-classpath/* > build/SHA256SUMS.txt
+          cp build/musor-classpath.txt build/
+          tar -czf build/musor-forge-1.20.1-47.4.10-classpath.tar.gz -C build musor-classpath SHA256SUMS.txt musor-classpath.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: musor-forge-1.20.1-47.4.10-classpath
+          path: probe/build/musor-forge-1.20.1-47.4.10-classpath.tar.gz
+          if-no-files-found: error
