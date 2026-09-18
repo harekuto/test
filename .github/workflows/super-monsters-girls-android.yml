@@ -436,7 +436,7 @@ jobs:
           7z l "$env:FINAL_APK" | Tee-Object work/apk-list.txt
           if(!(Select-String work/apk-list.txt -SimpleMatch "assets\game.droid")){throw "APK lacks game.droid"}
           foreach($n in 1..3){
-            if(!(Select-String work/apk-list.txt -SimpleMatch "audiogroup$n.dat")){throw "APK lacks audiogroup$n.dat"}
+            if(!(Select-String -Path work/apk-list.txt -SimpleMatch -Pattern "audiogroup$n.dat")){throw "APK lacks audiogroup$n.dat"}
           }
           if(Select-String work/apk-list.txt -Pattern '\.exe\s*$'){throw "Windows executable leaked into APK"}
           New-Item -ItemType Directory -Force work/apkextract | Out-Null
