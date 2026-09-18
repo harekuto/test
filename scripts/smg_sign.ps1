@@ -21,7 +21,7 @@ keytool -genkeypair -keystore $keyStore -storepass $pass -keypass $pass -alias p
 & $zipalign -f -p 4 work/unsigned.apk work/aligned.apk
 if ($LASTEXITCODE -ne 0) { throw 'zipalign failed' }
 
-$final = Join-Path $PWD 'dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.apk'
+$final = Join-Path $PWD 'dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.2.apk'
 & $apksigner sign --ks $keyStore --ks-key-alias port --ks-pass "pass:$pass" --key-pass "pass:$pass" --out $final work/aligned.apk
 if ($LASTEXITCODE -ne 0) { throw 'APK signing failed' }
 
