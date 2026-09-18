@@ -26,7 +26,7 @@ jobs:
           mkdir -p work report
           gdown "$DRIVE_URL" -O work/game.zip
           unzip -q work/game.zip -d work/game
-          git clone --depth=1 https://github.com/znm2500/GameMaker-Mobiler.git mobiler
+          git clone --depth=1 https://github.com/znm2500/GameMaker-Mobiler.git mobiler\n          rm -f mobiler/NuGet.config
       - name: Build audit tool
         run: |
           mkdir -p work/GmsAudit
