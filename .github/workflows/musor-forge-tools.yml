@@ -17,6 +17,9 @@ jobs:
           mkdir -p out
           curl -fL --retry 3             https://maven.minecraftforge.net/net/minecraftforge/ForgeAutoRenamingTool/1.0.2/ForgeAutoRenamingTool-1.0.2-all.jar             -o out/ForgeAutoRenamingTool-1.0.2-all.jar
           curl -fL --retry 3             https://raw.githubusercontent.com/MinecraftForge/renamer/master/renamer-gradle-demo/libs/mappings_official-1.20.1-20230612.114412-map2srg.tsrg.gz             -o out/mappings_official-1.20.1-20230612.114412-map2srg.tsrg.gz
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/shadofx/java-cfr-decompiler/main/cfr-0.152.jar \
+            -o out/cfr-0.152.jar
           sha256sum out/* | tee out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
