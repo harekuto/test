@@ -1,0 +1,52 @@
+name: Audit Second Game GML Input
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-second-game-gml.yml'
+      - 'port2/GmsAudit.Program.cs'
+  workflow_dispatch:
+env:
+  DRIVE_URL: https://drive.google.com/file/d/1P5tBahadA9hu2EH21632YGrFC25ewFaN/view?usp=drivesdk
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade gdown
+      - name: Download game and source library
+        run: |
+          mkdir -p work report
+          gdown "$DRIVE_URL" -O work/game.zip
+          unzip -q work/game.zip -d work/game
+          git clone --depth=1 https://github.com/znm2500/GameMaker-Mobiler.git mobiler
+      - name: Build audit tool
+        run: |
+          mkdir -p work/GmsAudit
+          cp port2/GmsAudit.Program.cs work/GmsAudit/Program.cs
+          cat > work/GmsAudit/GmsAudit.csproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+            <ItemGroup><ProjectReference Include="../../mobiler/UndertaleModLib/UndertaleModLib.csproj" /></ItemGroup>
+          </Project>
+          EOF
+          dotnet build work/GmsAudit/GmsAudit.csproj -c Release
+      - name: Decompile input/UI code
+        run: |
+          DATA="$(find work/game -iname data.win -print -quit)"
+          test -n "$DATA"
+          dotnet run --project work/GmsAudit/GmsAudit.csproj -c Release --no-build -- "$DATA" report | tee report/console.txt
+          README="$(find work/game -iname 'Readme(EN).txt' -print -quit)"
+          if [ -n "$README" ]; then cp "$README" report/readme-en.txt; cat "$README"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: second-game-gml-audit
+          path: report/
+          retention-days: 7
