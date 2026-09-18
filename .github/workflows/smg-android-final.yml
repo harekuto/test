@@ -50,8 +50,8 @@ jobs:
       - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
-          name: Super-Monsters-n-Girls-v2.0.2-Android-v1
-          path: dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.apk
+          name: Super-Monsters-n-Girls-v2.0.2-Android-v1.2
+          path: dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.2.apk
           compression-level: 0
           retention-days: 7
 
@@ -75,10 +75,61 @@ jobs:
       - name: Publish APK release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: smg-android-v1-final
-          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          tag_name: smg-android-v1-2
+          name: "Super Monsters'n Girls v2.0.2 Android v1.2"
           body: |
             Android port built from the supplied GameMaker 2.2.2.302 VM release.
             Touch controls: movement, Attack, Jump, Enter/Start, Menu/Escape.
-          files: dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.apk
+          files: dist/Super-Monsters-n-Girls-v2.0.2-Android-v1.2.apk
           overwrite_files: true
+
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Super-Monsters-n-Girls-v2.0.2-Android-v1.2
+          path: apk
+
+      - name: Verify APK artifact exists
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find apk -type f -name '*.apk' -printf '%p %s bytes\n'
+          test -n "$(find apk -type f -name '*.apk' -print -quit)"
+
+      - name: Android 29 x86 runtime smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: 29
+          arch: x86
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 25
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            adb logcat -d -v threadtime > smoke-log.txt
+            test -s smoke-pid.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then cat smoke-log.txt; exit 1; fi
+            echo SMOKE_OK
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SMG-Android-v1.2-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
