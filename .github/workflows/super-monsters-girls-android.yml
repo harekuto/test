@@ -15,6 +15,7 @@ env:
   APP_NAME: "Super Monsters'n Girls"
   VERSION_NAME: 2.0.2-android-v1
   MOBILER_COMMIT: 6a23adc1d4e71c238456568df18f85cc7b44caa9
+  PYTHONUTF8: '1'
 
 jobs:
   build:
