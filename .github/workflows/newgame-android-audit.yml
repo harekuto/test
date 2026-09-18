@@ -1,0 +1,193 @@
+name: New Game Android Port Audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/newgame-android-audit.yml'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install gdown
+          sudo apt-get update -qq
+          sudo apt-get install -y unzip file p7zip-full tree
+
+      - name: Download original game
+        run: |
+          mkdir -p work
+          cd work
+          gdown 1P5tBahadA9hu2EH21632YGrFC25ewFaN -O original_game.zip
+          test -s original_game.zip
+          file original_game.zip
+          stat -c '%n %s bytes' original_game.zip
+          sha256sum original_game.zip | tee original_game.sha256
+
+      - name: Extract
+        run: |
+          mkdir -p work/extracted
+          7z x -y work/original_game.zip -owork/extracted >/tmp/7z.log
+          tail -30 /tmp/7z.log
+          find work/extracted -type f | wc -l
+
+      - name: Deep project audit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, re, os, hashlib, collections
+
+          root=Path('work/extracted')
+          report=[]
+          files=[p for p in root.rglob('*') if p.is_file()]
+          report.append(f'FILES={len(files)}')
+          report.append(f'TOTAL_BYTES={sum(p.stat().st_size for p in files)}')
+
+          # root/top-level
+          tops=sorted({p.relative_to(root).parts[0] for p in files if p.relative_to(root).parts})
+          report.append('TOP_LEVEL='+' | '.join(tops[:100]))
+
+          exts=collections.Counter(p.suffix.lower() for p in files)
+          report.append('EXTENSIONS='+json.dumps(exts.most_common(80)))
+
+          names={p.name.lower():p for p in files}
+          paths=[str(p.relative_to(root)).replace('\\','/') for p in files]
+          lowpaths=[x.lower() for x in paths]
+
+          engine='UNKNOWN'
+          if any(x.endswith('www/js/rpg_core.js') or x.endswith('/js/rpg_core.js') for x in lowpaths):
+              engine='RPG Maker MV'
+          if any(x.endswith('js/rmmz_core.js') for x in lowpaths):
+              engine='RPG Maker MZ'
+          if any(p.name=='GameAssembly.dll' for p in files) or any(p.name.endswith('_Data') and p.is_dir() for p in root.rglob('*')):
+              engine='Unity'
+          if any(p.name=='project.godot' for p in files):
+              engine='Godot'
+          if any(p.name=='renpy' for p in files) or any(x.endswith('.rpa') for x in lowpaths):
+              engine='RenPy'
+          report.append('ENGINE='+engine)
+
+          # likely game root/index
+          for target in ['index.html','package.json','System.json','rpg_core.js','rmmz_core.js','plugins.js','main.js']:
+              hits=[p for p in files if p.name.lower()==target.lower()]
+              report.append(f'{target}_COUNT={len(hits)}')
+              for h in hits[:10]:
+                  report.append(f'  {target}: {h.relative_to(root)}')
+
+          # executables / windows runtime
+          win=[p for p in files if p.suffix.lower() in ('.exe','.dll','.pak','.bin','.dat') and p.stat().st_size>0]
+          report.append(f'WINDOWS_RUNTIME_FILES={len(win)}')
+          for p in sorted(win, key=lambda p:p.stat().st_size, reverse=True)[:50]:
+              report.append(f'  WIN {p.relative_to(root)} {p.stat().st_size}')
+
+          # find package.json + RPG maker version clues
+          for p in [p for p in files if p.name.lower()=='package.json'][:20]:
+              try:
+                  obj=json.loads(p.read_text('utf-8-sig',errors='replace'))
+                  report.append('PACKAGE_JSON '+str(p.relative_to(root))+' '+json.dumps(obj,ensure_ascii=False)[:1200])
+              except Exception as e:
+                  report.append(f'PACKAGE_JSON_ERR {p.relative_to(root)} {e}')
+
+          # input and plugin audit
+          jsfiles=[p for p in files if p.suffix.lower()=='.js']
+          report.append(f'JS_FILES={len(jsfiles)}')
+          patterns={
+              'Input.keyMapper':re.compile(r'Input\.keyMapper|keyMapper'),
+              'KeyboardEvent':re.compile(r'KeyboardEvent|keydown|keyup'),
+              'TouchInput':re.compile(r'TouchInput'),
+              'gamepad':re.compile(r'gamepad|Gamepad',re.I),
+              'nwjs':re.compile(r'process\.|require\s*\(|nw\.gui|nw\.',re.I),
+              'Decrypter':re.compile(r'Decrypter|decryptArrayBuffer|rpgmvp|rpgmvo|rpgmvm',re.I),
+              'screen-size':re.compile(r'boxWidth|boxHeight|screenWidth|screenHeight|816|624'),
+          }
+          for label,pat in patterns.items():
+              hits=[]
+              for p in jsfiles:
+                  try:s=p.read_text('utf-8-sig',errors='replace')
+                  except:continue
+                  if pat.search(s): hits.append(str(p.relative_to(root)))
+              report.append(f'{label}_FILES={len(hits)}')
+              for h in hits[:80]: report.append('  '+label+' '+h)
+
+          # RPG Maker exact data/plugins
+          pjson=[p for p in files if p.name.lower()=='plugins.js']
+          for p in pjson[:5]:
+              s=p.read_text('utf-8-sig',errors='replace')
+              enabled=len(re.findall(r'status\s*:\s*true',s))
+              disabled=len(re.findall(r'status\s*:\s*false',s))
+              report.append(f'PLUGINS {p.relative_to(root)} enabled_guess={enabled} disabled_guess={disabled}')
+              for m in re.finditer(r'name\s*:\s*["\']([^"\']+)["\']\s*,\s*status\s*:\s*(true|false)',s):
+                  report.append(f'  PLUGIN {m.group(2)} {m.group(1)}')
+
+          # inspect System.json
+          systems=[p for p in files if p.name.lower()=='system.json' and '/data/' in ('/'+str(p.relative_to(root)).replace('\\','/').lower())]
+          for p in systems[:5]:
+              try:
+                  o=json.loads(p.read_text('utf-8-sig',errors='replace'))
+                  subset={k:o.get(k) for k in ['gameTitle','versionId','hasEncryptedImages','hasEncryptedAudio','encryptionKey'] if k in o}
+                  report.append('SYSTEM '+str(p.relative_to(root))+' '+json.dumps(subset,ensure_ascii=False))
+              except Exception as e: report.append(f'SYSTEM_ERR {p.relative_to(root)} {e}')
+
+          # encrypted assets
+          enc=[p for p in files if p.suffix.lower() in ('.rpgmvp','.rpgmvo','.rpgmvm','.png_','.ogg_','.m4a_')]
+          report.append(f'ENCRYPTED_ASSETS={len(enc)}')
+          for p in enc[:30]:
+              head=p.read_bytes()[:40].hex()
+              report.append(f'  ENC {p.relative_to(root)} {p.stat().st_size} HEAD={head}')
+
+          # UI-ish images and resolutions
+          from struct import unpack
+          pngs=[p for p in files if p.suffix.lower()=='.png']
+          dims=collections.Counter()
+          for p in pngs:
+              try:
+                  b=p.read_bytes()[:24]
+                  if b[:8]==b'\x89PNG\r\n\x1a\n':
+                      w,h=unpack('>II',b[16:24]); dims[(w,h)]+=1
+              except: pass
+          report.append('PNG_COMMON_DIMS='+json.dumps([(list(k),v) for k,v in dims.most_common(30)]))
+
+          # candidate control terms from source
+          terms=['ok','cancel','menu','shift','pageup','pagedown','left','right','up','down','escape','enter','dash','attack','jump','interact','inventory','map']
+          for t in terms:
+              count=0
+              fileshit=[]
+              rx=re.compile(r'["\']'+re.escape(t)+r'["\']',re.I)
+              for p in jsfiles:
+                  try:s=p.read_text('utf-8-sig',errors='replace')
+                  except:continue
+                  if rx.search(s):
+                      count+=1
+                      if len(fileshit)<20: fileshit.append(str(p.relative_to(root)))
+              report.append(f'CONTROL_TERM {t} files={count} sample='+' | '.join(fileshit))
+
+          Path('work/audit.txt').write_text('\n'.join(report),encoding='utf-8')
+          print('\n'.join(report[:240]))
+          PY
+
+      - name: Archive key source files
+        run: |
+          mkdir -p work/keyfiles
+          find work/extracted -type f \( -iname 'package.json' -o -iname 'System.json' -o -iname 'plugins.js' -o -iname 'rpg_core.js' -o -iname 'rmmz_core.js' -o -iname 'main.js' -o -iname 'index.html' \) -print0 | while IFS= read -r -d '' f; do
+            rel="${f#work/extracted/}"
+            mkdir -p "work/keyfiles/$(dirname "$rel")"
+            cp "$f" "work/keyfiles/$rel"
+          done
+          cp work/original_game.sha256 work/keyfiles/
+          cp work/audit.txt work/keyfiles/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: newgame-audit
+          path: work/keyfiles
+          retention-days: 7
