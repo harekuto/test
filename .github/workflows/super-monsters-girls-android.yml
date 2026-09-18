@@ -242,6 +242,20 @@ jobs:
               s=s.replace(needle,needle+"\n"+add)
           draw.write_text(s,encoding="utf-8")
 
+          # GameMaker 2.2.2 compatibility: these state getter functions were
+          # introduced after this game's runtime. Preserve behavior with known defaults.
+          for p in root.rglob("*Draw_75.gml"):
+              try:
+                  t=p.read_text(encoding="utf-8-sig")
+              except Exception:
+                  continue
+              u=(t.replace("draw_get_font()", "-1")
+                    .replace("draw_get_halign()", "fa_left")
+                    .replace("draw_get_valign()", "fa_top"))
+              if u != t:
+                  p.write_text(u,encoding="utf-8")
+                  print("GM222_COMPAT", p)
+
           checks={
               mb:["global.ui_state = ini_read_real(\"UI\", \"state\", 4);"],
               create:["smg_enter_x","smg_escape_x"],
