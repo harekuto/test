@@ -1,0 +1,67 @@
+name: Super Monsters Girls Runtime Smoke Final
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/smg-runtime-smoke-final.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Download verified APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: harekuto/test
+          run-id: 35406046077
+
+      - name: Verify downloaded APK exists
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find apk -maxdepth 3 -type f -printf '%p %s bytes\n'
+          test -n "$(find apk -type f -name '*.apk' -print -quit)"
+
+      - name: Android runtime smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: 29
+          arch: x86
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 25
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            adb logcat -d -v threadtime > smoke-log.txt
+            test -s smoke-pid.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then cat smoke-log.txt; exit 1; fi
+            echo SMOKE_OK
+
+      - name: Upload runtime diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-runtime-smoke-final
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
