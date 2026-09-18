@@ -367,7 +367,7 @@ jobs:
               try: t=p.read_text(encoding="utf-8")
               except: continue
               if 'name="app_name"' in t:
-                  t=re.sub(r'(<string[^>]+name="app_name"[^>]*>).*?(</string>)',lambda m:m.group(1)+app+m.group(2),t,flags=re.S)
+                  android_app_name=app.replace("'", "\\\\'")\n                  t=re.sub(r'(<string[^>]+name="app_name"[^>]*>).*?(</string>)',lambda m:m.group(1)+android_app_name+m.group(2),t,flags=re.S)
                   p.write_text(t,encoding="utf-8")
 
           icon=Path("work/game-icon.png")
