@@ -61,6 +61,22 @@ jobs:
           Set-Location ..
           if (!(Test-Path "mobiler/GMS2 APK/2.2.2.apk")) { throw "Exact 2.2.2 runner template missing" }
 
+      - name: Patch upstream mobile scripts for GameMaker 2.2
+        shell: pwsh
+        run: |
+          $root="mobiler/Tools/移植脚本/安卓脚本v2.0/MobileScript"
+          Get-ChildItem $root -Recurse -Filter *.gml | ForEach-Object {
+            $s=Get-Content $_.FullName -Raw
+            $s=$s.Replace('draw_get_font()','-1')
+            $s=$s.Replace('draw_get_halign()','fa_left')
+            $s=$s.Replace('draw_get_valign()','fa_top')
+            $s=$s.Replace('draw_get_alpha()','1')
+            $s=$s.Replace('draw_get_color()','c_white')
+            Set-Content $_.FullName $s -Encoding UTF8
+          }
+          $bad=Get-ChildItem $root -Recurse -Filter *.gml | Select-String -Pattern 'draw_get_(font|halign|valign|alpha|color)'
+          if ($bad) { $bad | ForEach-Object { Write-Host $_ }; throw "Unsupported draw_get function remained" }
+
       - name: Build game-specific port CLI
         shell: pwsh
         run: |
