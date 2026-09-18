@@ -438,7 +438,264 @@ jobs:
           foreach($n in 1..3){
             if(!(Select-String -Path work/apk-list.txt -SimpleMatch -Pattern "audiogroup$n.dat")){throw "APK lacks audiogroup$n.dat"}
           }
-          if(Select-String -Path work/apk-list.txt -Pattern '\.exe\s*
+          if(Select-String -Path work/apk-list.txt -Pattern '\\.exe\\s*          New-Item -ItemType Directory -Force work/apkextract | Out-Null
+          Push-Location work/apkextract
+          7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
+          Pop-Location
+          & "$env:UTMT_CLI" info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+          $hash=(Get-FileHash "$env:FINAL_APK" -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item "$env:FINAL_APK").Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "RUNNER_TEMPLATE=$env:TEMPLATE_NAME" | Tee-Object -Append work/final-hash.txt
+          "GM_VERSION=$env:GM_MAJOR.$env:GM_MINOR.$env:GM_RELEASE.$env:GM_BUILD BYTECODE=$env:GM_BYTECODE VM" | Tee-Object -Append work/final-hash.txt
+
+      - name: Detect emulator-compatible ABI
+        id: abi
+        shell: pwsh
+        run: |
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -match 'lib\\x86_64\\libyoyo\.so'){
+            "emulator_arch=x86_64" >> $env:GITHUB_OUTPUT
+          } elseif($list -match 'lib\\x86\\libyoyo\.so'){
+            "emulator_arch=x86" >> $env:GITHUB_OUTPUT
+          } else {
+            "emulator_arch=none" >> $env:GITHUB_OUTPUT
+          }
+          Select-String -Path work/apk-list.txt -Pattern 'lib.yoyo\.so' | Tee-Object work/abis.txt
+
+      - name: Upload final APK for smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: ${{ env.FINAL_APK }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload QA diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-port-qa
+          path: |
+            work/original-sha256.txt
+            work/version-run.txt
+            work/mobile-injection.log
+            work/mobile-info.txt
+            work/control-verification.txt
+            work/aapt-badging.txt
+            work/signature.txt
+            work/zipalign-check.txt
+            work/apk-zip-test.txt
+            work/final-game-info.txt
+            work/final-hash.txt
+            work/abis.txt
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: super-monsters-girls-android-v1
+          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          body: |
+            Unofficial Android port generated from the user-provided Windows GameMaker VM build.
+            Touch controls: D-pad, Attack (Z/C), Jump (X), Enter/Start and Menu/Escape.
+            Build includes the original external audiogroups and a version-matched GameMaker Android runner.
+          files: ${{ env.FINAL_APK }}
+          overwrite_files: true
+
+  smoke:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.emulator_arch != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+
+      - name: Choose emulator API
+        id: emu
+        shell: bash
+        run: |
+          if [ "${{ needs.build.outputs.emulator_arch }}" = "x86_64" ]; then
+            echo "api=35" >> "$GITHUB_OUTPUT"
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=29" >> "$GITHUB_OUTPUT"
+            echo "arch=x86" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Android smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: ${{ steps.emu.outputs.api }}
+          arch: ${{ steps.emu.outputs.arch }}
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            APK="$(find apk -name '*.apk' | head -1)"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 18
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            if ! adb shell pidof "$TEST_PACKAGE" >/dev/null; then
+              adb logcat -d | tail -500 > smoke-log.txt
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb logcat -d | tail -1000 > smoke-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            echo "SMOKE_OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: super-monsters-girls-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
+){throw "Windows executable leaked into APK"}
+          New-Item -ItemType Directory -Force work/apkextract | Out-Null
+          Push-Location work/apkextract
+          7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
+          Pop-Location
+          & "$env:UTMT_CLI" info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+          $hash=(Get-FileHash "$env:FINAL_APK" -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item "$env:FINAL_APK").Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "RUNNER_TEMPLATE=$env:TEMPLATE_NAME" | Tee-Object -Append work/final-hash.txt
+          "GM_VERSION=$env:GM_MAJOR.$env:GM_MINOR.$env:GM_RELEASE.$env:GM_BUILD BYTECODE=$env:GM_BYTECODE VM" | Tee-Object -Append work/final-hash.txt
+
+      - name: Detect emulator-compatible ABI
+        id: abi
+        shell: pwsh
+        run: |
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -match 'lib\\x86_64\\libyoyo\.so'){
+            "emulator_arch=x86_64" >> $env:GITHUB_OUTPUT
+          } elseif($list -match 'lib\\x86\\libyoyo\.so'){
+            "emulator_arch=x86" >> $env:GITHUB_OUTPUT
+          } else {
+            "emulator_arch=none" >> $env:GITHUB_OUTPUT
+          }
+          Select-String work/apk-list.txt -Pattern 'lib.yoyo\.so' | Tee-Object work/abis.txt
+
+      - name: Upload final APK for smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: ${{ env.FINAL_APK }}
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload QA diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-monsters-girls-port-qa
+          path: |
+            work/original-sha256.txt
+            work/version-run.txt
+            work/mobile-injection.log
+            work/mobile-info.txt
+            work/control-verification.txt
+            work/aapt-badging.txt
+            work/signature.txt
+            work/zipalign-check.txt
+            work/apk-zip-test.txt
+            work/final-game-info.txt
+            work/final-hash.txt
+            work/abis.txt
+          retention-days: 30
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: super-monsters-girls-android-v1
+          name: "Super Monsters'n Girls v2.0.2 Android v1"
+          body: |
+            Unofficial Android port generated from the user-provided Windows GameMaker VM build.
+            Touch controls: D-pad, Attack (Z/C), Jump (X), Enter/Start and Menu/Escape.
+            Build includes the original external audiogroups and a version-matched GameMaker Android runner.
+          files: ${{ env.FINAL_APK }}
+          overwrite_files: true
+
+  smoke:
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.emulator_arch != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: super-monsters-girls-android-v1
+          path: apk
+
+      - name: Choose emulator API
+        id: emu
+        shell: bash
+        run: |
+          if [ "${{ needs.build.outputs.emulator_arch }}" = "x86_64" ]; then
+            echo "api=35" >> "$GITHUB_OUTPUT"
+            echo "arch=x86_64" >> "$GITHUB_OUTPUT"
+          else
+            echo "api=29" >> "$GITHUB_OUTPUT"
+            echo "arch=x86" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Android smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: ${{ steps.emu.outputs.api }}
+          arch: ${{ steps.emu.outputs.arch }}
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            APK="$(find apk -name '*.apk' | head -1)"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 18
+            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
+            if ! adb shell pidof "$TEST_PACKAGE" >/dev/null; then
+              adb logcat -d | tail -500 > smoke-log.txt
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb logcat -d | tail -1000 > smoke-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then
+              cat smoke-log.txt
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
+            echo "SMOKE_OK"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: super-monsters-girls-runtime-smoke
+          path: |
+            smoke-pid.txt
+            smoke-log.txt
+            smoke-activity.txt
+          if-no-files-found: ignore
+          retention-days: 30
+){throw "Windows executable leaked into APK"}
           New-Item -ItemType Directory -Force work/apkextract | Out-Null
           Push-Location work/apkextract
           7z e -y "$env:FINAL_APK" "assets/game.droid" | Out-Null
