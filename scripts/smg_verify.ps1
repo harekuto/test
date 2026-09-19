@@ -19,6 +19,80 @@ if ($list -notmatch 'game\.droid') { throw 'APK lacks game.droid' }
 foreach ($n in 1..3) {
     if ($list -notmatch "audiogroup$n\.dat") { throw "APK lacks audiogroup$n.dat" }
 }
+if ($list -notmatch 'lib\\arm64-v8a\\libyoyo\.so') { throw 'APK lacks arm64 GameMaker runner' }
+if ($list -notmatch 'lib\\x86\\libyoyo\.so') { throw 'APK lacks x86 GameMaker runner' }
+
+7z l -slt $final | Tee-Object work/apk-list-slt.txt | Out-Null
+$slt = Get-Content work/apk-list-slt.txt -Raw
+$blocks = $slt -split "(?:\r?\n){2,}"
+$gameBlock = $blocks | Where-Object { $_ -match '(?m)^Path = assets\\game\.droid
+
+New-Item -ItemType Directory -Force work/apkextract | Out-Null
+Push-Location work/apkextract
+7z e -y $final 'assets/game.droid' | Out-Null
+Pop-Location
+
+& $env:UTMT_CLI info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+if ($LASTEXITCODE -ne 0) { throw 'Final game.droid parsing failed' }
+
+$hash = (Get-FileHash $final -Algorithm SHA256).Hash.ToLower()
+$size = (Get-Item $final).Length
+"APK_SIZE=$size" | Tee-Object work/final-hash.txt
+"APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+"RUNNER_TEMPLATE=2.2.2.apk" | Tee-Object -Append work/final-hash.txt
+"GM_VERSION=2.2.2.302 BYTECODE=17 VM" | Tee-Object -Append work/final-hash.txt
+
+Write-Host "APK_SIZE=$size"
+Write-Host "APK_SHA256=$hash"
+ } | Select-Object -First 1
+if (!$gameBlock) { throw 'Could not inspect game.droid compression mode' }
+$sizeMatch = [regex]::Match($gameBlock, '(?m)^Size = (\d+)
+
+New-Item -ItemType Directory -Force work/apkextract | Out-Null
+Push-Location work/apkextract
+7z e -y $final 'assets/game.droid' | Out-Null
+Pop-Location
+
+& $env:UTMT_CLI info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+if ($LASTEXITCODE -ne 0) { throw 'Final game.droid parsing failed' }
+
+$hash = (Get-FileHash $final -Algorithm SHA256).Hash.ToLower()
+$size = (Get-Item $final).Length
+"APK_SIZE=$size" | Tee-Object work/final-hash.txt
+"APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+"RUNNER_TEMPLATE=2.2.2.apk" | Tee-Object -Append work/final-hash.txt
+"GM_VERSION=2.2.2.302 BYTECODE=17 VM" | Tee-Object -Append work/final-hash.txt
+
+Write-Host "APK_SIZE=$size"
+Write-Host "APK_SHA256=$hash"
+)
+$packedMatch = [regex]::Match($gameBlock, '(?m)^Packed Size = (\d+)
+
+New-Item -ItemType Directory -Force work/apkextract | Out-Null
+Push-Location work/apkextract
+7z e -y $final 'assets/game.droid' | Out-Null
+Pop-Location
+
+& $env:UTMT_CLI info work/apkextract/game.droid -v 2>&1 | Tee-Object work/final-game-info.txt
+if ($LASTEXITCODE -ne 0) { throw 'Final game.droid parsing failed' }
+
+$hash = (Get-FileHash $final -Algorithm SHA256).Hash.ToLower()
+$size = (Get-Item $final).Length
+"APK_SIZE=$size" | Tee-Object work/final-hash.txt
+"APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+"RUNNER_TEMPLATE=2.2.2.apk" | Tee-Object -Append work/final-hash.txt
+"GM_VERSION=2.2.2.302 BYTECODE=17 VM" | Tee-Object -Append work/final-hash.txt
+
+Write-Host "APK_SIZE=$size"
+Write-Host "APK_SHA256=$hash"
+)
+if (!$sizeMatch.Success -or !$packedMatch.Success) { throw 'Could not parse game.droid ZIP sizes' }
+$gameSize = [int64]$sizeMatch.Groups[1].Value
+$gamePacked = [int64]$packedMatch.Groups[1].Value
+if ($gameSize -ne $gamePacked) {
+    throw "game.droid is compressed ($gamePacked/$gameSize); legacy runner would inflate it into RAM"
+}
+"GAME_DROID_STORED=$gameSize" | Tee-Object work/game-droid-compression.txt
 
 New-Item -ItemType Directory -Force work/apkextract | Out-Null
 Push-Location work/apkextract
