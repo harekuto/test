@@ -1,5 +1,5 @@
 name: SMG Android Final Build
-# Trigger revision 4
+# Trigger revision 5
 
 permissions:
   contents: write
@@ -54,8 +54,8 @@ jobs:
       - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
-          name: Super-Monsters-n-Girls-v2.0.2-Android-v3
-          path: dist/Super-Monsters-n-Girls-v2.0.2-Android-v3.apk
+          name: Super-Monsters-n-Girls-v2.0.2-Android-v4
+          path: dist/Super-Monsters-n-Girls-v2.0.2-Android-v4.apk
           compression-level: 0
           retention-days: 7
 
@@ -80,12 +80,12 @@ jobs:
       - name: Publish APK release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: smg-android-v3
-          name: "Super Monsters'n Girls v2.0.2 Android v3"
+          tag_name: smg-android-v4
+          name: "Super Monsters'n Girls v2.0.2 Android v4"
           body: |
-            Corrected Android v3 port built from the supplied GameMaker 2.2.2.302 VM release.
+            Corrected Android v4 port built from the supplied GameMaker 2.2.2.302 VM release.
             Compact 640x480-safe touch layout, migrated saved positions, movement, Z/X/C, Enter and Escape.
-          files: dist/Super-Monsters-n-Girls-v2.0.2-Android-v3.apk
+          files: dist/Super-Monsters-n-Girls-v2.0.2-Android-v4.apk
           overwrite_files: true
 
 
@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Super-Monsters-n-Girls-v2.0.2-Android-v3
+          name: Super-Monsters-n-Girls-v2.0.2-Android-v4
           path: apk
 
       - name: Verify APK artifact exists
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: SMG-Android-v3-runtime-smoke
+          name: SMG-Android-v4-runtime-smoke
           path: |
             smoke-pid.txt
             smoke-log.txt
