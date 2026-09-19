@@ -1,0 +1,63 @@
+name: SMG Android Visual QA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/smg-visual-qa.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Download verified v2 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: Super-Monsters-n-Girls-v2.0.2-Android-v2
+          path: apk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: harekuto/test
+          run-id: 35441243539
+
+      - name: Android 29 visual QA
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.supermonstersgirls
+        with:
+          api-level: 29
+          arch: x86
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          script: |
+            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 25
+            adb shell wm size > visual-display.txt
+            adb shell wm density >> visual-display.txt
+            adb shell dumpsys window displays >> visual-display.txt
+            adb exec-out screencap -p > smg-launch.png
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > visual-activity.txt || true
+            adb logcat -d -v threadtime > visual-log.txt
+            test -s smg-launch.png
+            test -s visual-activity.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' visual-log.txt; then cat visual-log.txt; exit 1; fi
+
+      - name: Upload visual QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMG-Android-v2-visual-QA
+          path: |
+            smg-launch.png
+            visual-display.txt
+            visual-activity.txt
+            visual-log.txt
+          if-no-files-found: error
+          retention-days: 30
