@@ -1,0 +1,44 @@
+name: SMG Targeted Input Semantics
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/smg-input-semantics.yml'
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare game and tools
+        shell: pwsh
+        run: ./scripts/smg_prepare.ps1
+      - name: Dump selected GML semantics
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force work/decomp | Out-Null
+          & "$env:UTMT_CLI" dump "$env:DATA_WIN" -c UMT_DUMP_ALL -o work/decomp 2>&1 | Tee-Object work/semantics-dump.log
+          $targets=@(
+            'gml_Script_getAttack.gml',
+            'gml_Script_getJump.gml',
+            'gml_Script_getEnter.gml',
+            'gml_Object_objPlayerAbs_Step_1.gml'
+          )
+          New-Item -ItemType Directory -Force work/selected | Out-Null
+          foreach($name in $targets){
+            $f=Get-ChildItem work/decomp -Recurse -Filter $name | Select-Object -First 1
+            if(!$f){throw "Missing $name"}
+            Copy-Item $f.FullName (Join-Path work/selected $name)
+            Write-Host "===== $name ====="
+            Get-Content $f.FullName
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smg-input-semantics
+          path: work/selected
+          retention-days: 7
