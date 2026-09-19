@@ -50,6 +50,11 @@ if re.search(r'android:versionCode\s*=', s):
         lambda m: m.group(1) + version_code + m.group(2),
         s,
     )
+else:
+    s = s.replace("<manifest ", f'<manifest android:versionCode="{version_code}" ', 1)
+
+if not re.search(r'android:versionName\s*=', s):
+    s = s.replace("<manifest ", f'<manifest android:versionName="{version_name}" ', 1)
 s = re.sub(
     r'android:screenOrientation\s*=\s*["\'][^"\']*["\']',
     'android:screenOrientation="sensorLandscape"',
@@ -64,14 +69,16 @@ manifest.write_text(s, encoding="utf-8")
 apktool_yml = root / "apktool.yml"
 if apktool_yml.exists():
     y = apktool_yml.read_text(encoding="utf-8")
-    y = re.sub(r"(?m)^(\s*versionCode:\s*).*$", lambda m: m.group(1) + "'" + version_code + "'", y)
+    y = re.sub(r"(?m)^(\s*versionCode:\s*).*$", lambda m: m.group(1) + version_code, y)
     y = re.sub(r"(?m)^(\s*versionName:\s*).*$", lambda m: m.group(1) + "'" + version_name + "'", y)
     apktool_yml.write_text(y, encoding="utf-8")
 
-# Fail early if the decoded manifest itself did not receive the requested values.
+# Validate final decoded metadata source.
 check = manifest.read_text(encoding="utf-8")
 if version_name not in check:
     raise SystemExit("versionName patch did not reach AndroidManifest.xml")
+if version_code not in check:
+    raise SystemExit("versionCode patch did not reach AndroidManifest.xml")
 
 
 escaped_app_name = app_name.replace("'", "\\'")
