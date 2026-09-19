@@ -6,8 +6,8 @@ if (!(Test-Path $final)) { throw 'Final APK missing' }
 
 $badging = Get-Content work/aapt-badging.txt -Raw
 if ($badging -notmatch "name='com\.harekuto\.supermonstersgirls'") { throw 'Final APK package mismatch' }
-if ($badging -notmatch "versionCode='300'") { throw 'Final APK versionCode mismatch' }
-if ($badging -notmatch "versionName='2\.0\.2-android-v3'") { throw 'Final APK versionName mismatch' }
+if ($badging -notmatch "versionCode='400'") { throw 'Final APK versionCode mismatch' }
+if ($badging -notmatch "versionName='2\.0\.2-android-v4'") { throw 'Final APK versionName mismatch' }
 
 7z t $final | Tee-Object work/apk-zip-test.txt
 if ($LASTEXITCODE -ne 0) { throw 'APK ZIP integrity test failed' }
