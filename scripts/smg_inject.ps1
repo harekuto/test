@@ -5,7 +5,7 @@ $env:PYTHONUTF8 = '1'
 if (!(Test-Path $env:DATA_WIN)) { throw 'DATA_WIN missing' }
 if (!(Test-Path $env:UTMT_CLI)) { throw 'UTMT_CLI missing' }
 
-python scripts/smg_patch_mobile_v2.py work/mobiler
+python scripts/smg_patch_mobile_v3.py work/mobiler
 
 $integration = Get-ChildItem work/mobiler -Recurse -Filter 'Mobile集成脚本.csx' | Select-Object -First 1
 if (!$integration) { throw 'Mobile integration script not found' }
