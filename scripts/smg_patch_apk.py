@@ -14,8 +14,8 @@ if not manifest.exists():
 
 package_name = os.environ.get("PACKAGE_NAME", "com.harekuto.supermonstersgirls")
 app_name = os.environ.get("APP_NAME", "Super Monsters'n Girls")
-version_name = os.environ.get("VERSION_NAME", "2.0.2-android-v2")
-version_code = os.environ.get("VERSION_CODE", "200")
+version_name = os.environ.get("VERSION_NAME", "2.0.2-android-v3")
+version_code = os.environ.get("VERSION_CODE", "300")
 
 s = manifest.read_text(encoding="utf-8")
 m = re.search(r'\bpackage\s*=\s*["\']([^"\']+)["\']', s)
