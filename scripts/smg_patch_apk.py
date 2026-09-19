@@ -71,6 +71,39 @@ if apktool_yml.exists():
     y = apktool_yml.read_text(encoding="utf-8")
     y = re.sub(r"(?m)^(\s*versionCode:\s*).*$", lambda m: m.group(1) + version_code, y)
     y = re.sub(r"(?m)^(\s*versionName:\s*).*$", lambda m: m.group(1) + "'" + version_name + "'", y)
+
+    # Keep the huge GameMaker data asset seekable inside the APK.
+    # Compressing it makes this legacy runner inflate ~1.2 GB into RAM.
+    lines = y.splitlines()
+    try:
+        header = next(i for i, line in enumerate(lines) if line.strip() == "doNotCompress:")
+    except StopIteration:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(["doNotCompress:", "- droid", "- dat"])
+    else:
+        end = header + 1
+        while end < len(lines):
+            stripped = lines[end].strip()
+            if not stripped or stripped.startswith("-"):
+                end += 1
+                continue
+            break
+
+        existing = set()
+        for line in lines[header + 1:end]:
+            stripped = line.strip()
+            if stripped.startswith("-"):
+                existing.add(stripped[1:].strip().strip("'\""))
+
+        additions = []
+        for ext in ("droid", "dat"):
+            if ext not in existing:
+                additions.append("- " + ext)
+        if additions:
+            lines[end:end] = additions
+
+    y = "\n".join(lines) + ("\n" if y.endswith("\n") else "")
     apktool_yml.write_text(y, encoding="utf-8")
 
 # Validate final decoded metadata source.
