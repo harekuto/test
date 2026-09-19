@@ -74,6 +74,7 @@ jobs:
             work/apk-zip-test.txt
             work/final-game-info.txt
             work/final-hash.txt
+            work/game-droid-compression.txt
           retention-days: 30
 
       - name: Publish APK release
@@ -118,6 +119,7 @@ jobs:
           script: |
             adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
             adb logcat -c
+            adb shell settings put secure immersive_mode_confirmations confirmed || true
             adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 25
             adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
@@ -126,7 +128,7 @@ jobs:
             adb logcat -d -v threadtime > smoke-log.txt
             test -s smoke-pid.txt
             test -s smoke-screen.png
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL' smoke-log.txt; then cat smoke-log.txt; exit 1; fi
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed' smoke-log.txt; then cat smoke-log.txt; exit 1; fi
             echo SMOKE_OK
 
       - uses: actions/upload-artifact@v4
