@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 $env:PYTHONUTF8 = '1'
 $env:PACKAGE_NAME = 'com.harekuto.supermonstersgirls'
 $env:APP_NAME = "Super Monsters'n Girls"
-$env:VERSION_NAME = '2.0.2-android-v3'
-$env:VERSION_CODE = '300'
+$env:VERSION_NAME = '2.0.2-android-v4'
+$env:VERSION_CODE = '400'
 
 if (!(Test-Path $env:TEMPLATE_APK)) { throw 'Android runner template missing' }
 if (!(Test-Path $env:MOBILE_WIN)) { throw 'MOBILE_WIN missing' }
