@@ -47,7 +47,7 @@ jobs:
           disable-linux-hw-accel: false
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
-            set -euxo pipefail
+            set -eux
             APK="$(find apk -type f -name '*.apk' -print -quit)"
             test -n "$APK"
             adb install -r "$APK"
