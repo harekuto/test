@@ -125,9 +125,8 @@ jobs:
             test -n "$(find apk -type f -name '*.apk' -print -quit)"
             adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
             adb shell settings put secure immersive_mode_confirmations confirmed || true
-            adb shell settings put policy_control immersive.full=* || true
             adb logcat -c
-            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            adb shell am start -W -n "$TEST_PACKAGE/.RunnerActivity"
             sleep 8
             adb shell pidof "$TEST_PACKAGE" | tee pid-agreement.txt
             test -s pid-agreement.txt
@@ -148,7 +147,7 @@ jobs:
             adb logcat -d -v threadtime > hhp-final-log.txt
             if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-final-log.txt; then cat hhp-final-log.txt; exit 1; fi
             adb shell am force-stop "$TEST_PACKAGE"
-            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            adb shell am start -W -n "$TEST_PACKAGE/.RunnerActivity"
             sleep 10
             adb shell pidof "$TEST_PACKAGE" | tee pid-relaunch.txt
             test -s pid-relaunch.txt
