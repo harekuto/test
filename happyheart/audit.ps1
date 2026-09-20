@@ -60,8 +60,8 @@ $hits | Select-Object -First 12000 | ForEach-Object {
 
 $keys=@('vk_left','vk_right','vk_up','vk_down','vk_enter','vk_escape','vk_space','vk_shift','vk_control','vk_tab','vk_backspace','ord("Z")','ord("X")','ord("C")','ord("A")','ord("S")','ord("D")','ord("W")','ord("E")','ord("Q")','ord("R")','ord("F")')
 foreach($k in $keys){
-  $m=$gml | Select-String -SimpleMatch $k
-  if($m){
+  $m=@($gml | Select-String -SimpleMatch $k)
+  if($m.Count -gt 0){
     "===== $k ($($m.Count)) =====" | Add-Content report/key-semantics.txt
     $m | Select-Object -First 80 | ForEach-Object {
       "$($_.Path.Replace((Resolve-Path work/dump).Path,'')):$($_.LineNumber): $($_.Line.Trim())"
