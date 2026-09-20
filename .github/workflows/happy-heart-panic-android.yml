@@ -2,6 +2,7 @@ name: Happy Heart Panic Android Port
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: happy-heart-panic-android
@@ -14,6 +15,8 @@ on:
     paths:
       - '.github/workflows/happy-heart-panic-android.yml'
       - 'happyheart/patch_mobile.py'
+      - 'happyheart/patch_stability.py'
+      - 'happyheart/apply_stability.csx'
       - 'happyheart/prepare.ps1'
       - 'happyheart/inject.ps1'
       - 'happyheart/patch_apk.py'
@@ -34,97 +37,185 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Prepare original game and port tools
         shell: pwsh
         run: ./happyheart/prepare.ps1
-      - name: Inject tailored touch controls
+
+      - name: Inject touch controls and stability fixes
         shell: pwsh
         run: ./happyheart/inject.ps1
+
       - name: Build Android package
         shell: pwsh
         run: ./happyheart/package.ps1
+
       - name: Align and sign APK
         shell: pwsh
         run: ./happyheart/sign.ps1
+
       - name: Deep verify APK
         shell: pwsh
         run: ./happyheart/verify.ps1
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v1
-          path: dist/Happy-Heart-Panic-2025-Android-v1.apk
+          name: Happy-Heart-Panic-2025-Android-v2
+          path: dist/Happy-Heart-Panic-2025-Android-v2.apk
           compression-level: 0
-          retention-days: 7
-      - name: Upload QA
+          retention-days: 14
+
+      - name: Upload static QA
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-QA
+          name: Happy-Heart-Panic-Android-v2-static-QA
           path: |
             work/original-sha256.txt
             work/version-run.txt
             work/mobile-injection.log
+            work/stability-dump.log
+            work/stability-source-patch.log
+            work/stability-import.log
             work/control-verification.txt
+            work/sidecar-hashes.txt
+            work/verified-sidecar-hashes.txt
             work/aapt-badging.txt
             work/signature.txt
             work/zipalign-check.txt
             work/apk-zip-test.txt
             work/game-droid-compression.txt
             work/final-game-info.txt
+            work/final-decompile.log
             work/final-hash.txt
           retention-days: 30
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: happy-heart-panic-android-v1
-          name: Happy Heart Panic 2025 Android v1
-          body: |
-            Android port built from the supplied GameMaker 2023.8.0.0 VM build.
-            Touch layout is based on the game's decompiled input map: movement/jump, interact/OK, light/heavy attack, taunt, dash, items, retry, extra interaction, back, zoom, mute and scene lock.
-          files: dist/Happy-Heart-Panic-2025-Android-v1.apk
-          overwrite_files: true
 
   smoke:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
     steps:
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; ls -l /dev/kvm; fi
+
       - uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v1
+          name: Happy-Heart-Panic-2025-Android-v2
           path: apk
-      - name: Android 29 x86 runtime + visual smoke
+
+      - name: Android 35 x86_64 launch, menu and gameplay smoke
         uses: reactivecircus/android-emulator-runner@v2
         env:
           TEST_PACKAGE: com.harekuto.happyheartpanic
         with:
           api-level: 35
           arch: x86_64
-          profile: pixel_2
+          profile: pixel_7_pro
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
           disable-animations: true
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
-            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
+            set -eu
+            APK="$(find apk -type f -name '*.apk' -print -quit)"
+            test -n "$APK"
+            adb install -r "$APK"
             adb logcat -c
+
+            # First launch: agreement screen should appear without crashing.
             adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
-            sleep 25
-            adb shell pidof "$TEST_PACKAGE" | tee smoke-pid.txt
-            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > smoke-activity.txt || true
-            adb exec-out screencap -p > hhp-launch.png
-            adb logcat -d -v threadtime > smoke-log.txt
-            test -s smoke-pid.txt
-            test -s hhp-launch.png
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed' smoke-log.txt; then cat smoke-log.txt; exit 1; fi
-            echo SMOKE_OK
+            sleep 8
+            adb shell pidof "$TEST_PACKAGE" | tee pid-agreement.txt
+            test -s pid-agreement.txt
+            adb exec-out screencap -p > hhp-agreement.png
+
+            # Accept agreement. The game restarts and must reach o_menu safely.
+            adb shell input keyevent 66
+            sleep 12
+            adb shell pidof "$TEST_PACKAGE" | tee pid-menu.txt
+            test -s pid-menu.txt
+            adb exec-out screencap -p > hhp-menu.png
+
+            adb logcat -d -v threadtime > hhp-menu-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-menu-log.txt; then
+              cat hhp-menu-log.txt
+              exit 1
+            fi
+
+            # Default menu cursor is New Game. Enter must transition into gameplay.
+            adb shell input keyevent 66
+            sleep 20
+            adb shell pidof "$TEST_PACKAGE" | tee pid-gameplay.txt
+            test -s pid-gameplay.txt
+            adb exec-out screencap -p > hhp-gameplay.png
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > hhp-activity.txt || true
+            adb logcat -d -v threadtime > hhp-final-log.txt
+
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-final-log.txt; then
+              cat hhp-final-log.txt
+              exit 1
+            fi
+
+            # Re-launch once to verify agreement persistence and writable save area.
+            adb shell am force-stop "$TEST_PACKAGE"
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 10
+            adb shell pidof "$TEST_PACKAGE" | tee pid-relaunch.txt
+            test -s pid-relaunch.txt
+            adb exec-out screencap -p > hhp-relaunch.png
+            adb logcat -d -v threadtime > hhp-relaunch-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-relaunch-log.txt; then
+              cat hhp-relaunch-log.txt
+              exit 1
+            fi
+
+            echo HHP_RUNTIME_SMOKE_OK
+
       - name: Upload runtime QA
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-runtime-QA
+          name: Happy-Heart-Panic-Android-v2-runtime-QA
           path: |
-            smoke-pid.txt
-            smoke-log.txt
-            smoke-activity.txt
-            hhp-launch.png
+            pid-agreement.txt
+            pid-menu.txt
+            pid-gameplay.txt
+            pid-relaunch.txt
+            hhp-agreement.png
+            hhp-menu.png
+            hhp-gameplay.png
+            hhp-relaunch.png
+            hhp-menu-log.txt
+            hhp-final-log.txt
+            hhp-relaunch-log.txt
+            hhp-activity.txt
           if-no-files-found: ignore
           retention-days: 30
+
+  publish:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Happy-Heart-Panic-2025-Android-v2
+          path: dist
+      - name: Publish tested release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: happy-heart-panic-android-v2
+          name: Happy Heart Panic 2025 Android v2 - File I/O Fix
+          body: |
+            Fixed Android port based on the supplied GameMaker 2023.8.0.0 VM build.
+            
+            v2 fixes the startup o_menu crash caused by missing supporters.txt, preserves credits.txt and other original sidecar files, moves agreement.txt to writable GameMaker storage, and adds defensive file-read guards.
+            
+            This release is published only after the Android emulator passes first launch, agreement acceptance, o_menu/main-menu startup, New Game startup, relaunch, screenshot capture, and fatal Logcat checks.
+          files: dist/Happy-Heart-Panic-2025-Android-v2.apk
+          overwrite_files: true
