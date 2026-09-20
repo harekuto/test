@@ -83,4 +83,10 @@ $fileHits | Select-Object -First 20000 | ForEach-Object {
   "$($_.Path.Replace((Resolve-Path work/dump).Path,'')):$($_.LineNumber): $($_.Line.Trim())"
 } | Set-Content report/file-io-hits.txt -Encoding UTF8
 
+New-Item -ItemType Directory -Force report/fileio-gml | Out-Null
+$fileHits | Group-Object Path | ForEach-Object {
+  $p=[IO.FileInfo]$_.Name
+  Copy-Item $p.FullName (Join-Path report/fileio-gml $p.Name) -Force
+}
+
 Get-ChildItem $gameDir -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize | Out-String -Width 400 | Set-Content report/game-files.txt
