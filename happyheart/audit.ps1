@@ -78,4 +78,9 @@ foreach($group in $interesting | Select-Object -First 35){
   Copy-Item $p.FullName (Join-Path report/gml $p.Name) -Force
 }
 
+$fileHits=$gml | Select-String -Pattern 'file_(text_)?(open|read|write|exists|delete|rename|copy|find)|working_directory|program_directory|environment_get_variable' -CaseSensitive:$false
+$fileHits | Select-Object -First 20000 | ForEach-Object {
+  "$($_.Path.Replace((Resolve-Path work/dump).Path,'')):$($_.LineNumber): $($_.Line.Trim())"
+} | Set-Content report/file-io-hits.txt -Encoding UTF8
+
 Get-ChildItem $gameDir -Recurse -File | Select-Object FullName,Length | Format-Table -AutoSize | Out-String -Width 400 | Set-Content report/game-files.txt
