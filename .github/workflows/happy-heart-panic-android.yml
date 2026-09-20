@@ -61,15 +61,15 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v2
-          path: dist/Happy-Heart-Panic-2025-Android-v2.apk
+          name: Happy-Heart-Panic-2025-Android-v3
+          path: dist/Happy-Heart-Panic-2025-Android-v3.apk
           compression-level: 0
           retention-days: 14
 
       - name: Upload static QA
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-v2-static-QA
+          name: Happy-Heart-Panic-Android-v3-static-QA
           path: |
             work/original-sha256.txt
             work/version-run.txt
@@ -104,7 +104,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v2
+          name: Happy-Heart-Panic-2025-Android-v3
           path: apk
 
       - name: Android 35 x86_64 launch, menu and gameplay smoke
@@ -161,7 +161,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-v2-runtime-QA
+          name: Happy-Heart-Panic-Android-v3-runtime-QA
           path: |
             pid-agreement.txt
             pid-menu.txt
@@ -184,18 +184,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v2
+          name: Happy-Heart-Panic-2025-Android-v3
           path: dist
       - name: Publish tested release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: happy-heart-panic-android-v2
-          name: Happy Heart Panic 2025 Android v2 - File I/O Fix
+          tag_name: happy-heart-panic-android-v3
+          name: Happy Heart Panic 2025 Android v3 - Hardened Port
           body: |
             Fixed Android port based on the supplied GameMaker 2023.8.0.0 VM build.
             
-            v2 fixes the startup o_menu crash caused by missing supporters.txt, preserves credits.txt and other original sidecar files, moves agreement.txt to writable GameMaker storage, and adds defensive file-read guards.
+            v3 fixes the startup o_menu crash caused by supporters.txt, preserves required sidecar files, moves agreement.txt to writable GameMaker storage, hardens control/savepoint reads and writes against invalid file handles, and corrects the DLC included-file path for Android.
             
             This release is published only after the Android emulator passes first launch, agreement acceptance, o_menu/main-menu startup, New Game startup, relaunch, screenshot capture, and fatal Logcat checks.
-          files: dist/Happy-Heart-Panic-2025-Android-v2.apk
+          files: dist/Happy-Heart-Panic-2025-Android-v3.apk
           overwrite_files: true
