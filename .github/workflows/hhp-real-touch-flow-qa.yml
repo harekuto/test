@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/hhp-real-touch-flow-qa.yml'
+      - 'happyheart/real_touch_qa.sh'
 
 permissions:
   actions: read
@@ -36,8 +37,6 @@ jobs:
 
       - name: Real touch agreement -> menu -> gameplay QA
         uses: reactivecircus/android-emulator-runner@v2
-        env:
-          TEST_PACKAGE: com.harekuto.happyheartpanic
         with:
           api-level: 35
           arch: x86_64
@@ -48,7 +47,7 @@ jobs:
           disable-animations: true
           disable-linux-hw-accel: false
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
-          script: bash happyheart/real_touch_flow_qa.sh
+          script: bash happyheart/real_touch_qa.sh
 
       - name: Upload real-flow QA
         if: always()
@@ -67,6 +66,8 @@ jobs:
             pid-agreement.txt
             pid-menu.txt
             pid-gameplay.txt
+            pid-controls.txt
             pid-relaunch.txt
+            gameplay-after-controls.png
           if-no-files-found: ignore
           retention-days: 30
