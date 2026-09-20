@@ -1,8 +1,8 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:HHP_PACKAGE='com.harekuto.happyheartpanic'
-$env:HHP_VERSION='2025-android-v2'
-$env:HHP_VCODE='200'
+$env:HHP_VERSION='2025-android-v3'
+$env:HHP_VCODE='300'
 
 $apktool=Get-ChildItem work/mobiler -Recurse -Filter 'apktool_3.0.3.jar' | Select-Object -First 1
 if(!$apktool){ throw 'apktool missing' }
