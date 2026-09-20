@@ -1,0 +1,188 @@
+from pathlib import Path
+import sys
+
+if len(sys.argv) != 3:
+    raise SystemExit("usage: patch_stability.py <dump-root> <patch-output>")
+
+dump=Path(sys.argv[1])
+out=Path(sys.argv[2])
+out.mkdir(parents=True,exist_ok=True)
+
+def find(name):
+    hits=list(dump.rglob(name))
+    if len(hits)!=1:
+        raise SystemExit(f"Expected exactly one {name}, got {len(hits)}: {hits}")
+    return hits[0]
+
+def write_patch(name, transform):
+    src=find(name)
+    text=src.read_text(encoding="utf-8-sig")
+    new=transform(text)
+    if new==text:
+        raise SystemExit(f"No changes made to {name}")
+    dst=out/name
+    dst.write_text(new,encoding="utf-8")
+    print("PATCHED",name)
+
+def replace_exact(text, old, new, label):
+    if old not in text:
+        raise SystemExit(f"Missing expected block for {label}")
+    return text.replace(old,new,1)
+
+def menu_create(text):
+    text=replace_exact(text,
+'''if (!file_exists("agreement.txt"))
+{
+    room_goto(r_agree);
+}''',
+'''if (!file_exists("agreement.txt"))
+{
+    room_goto(r_agree);
+    exit;
+}''',"agreement redirect")
+
+    text=replace_exact(text,
+'''var file = file_text_open_read("supporters.txt");
+var i = 0;
+while (!file_text_eof(file))
+{
+    global.supporter[i++] = file_text_read_string(file);
+    file_text_readln(file);
+}''',
+'''var i = 0;
+if (file_exists("supporters.txt"))
+{
+    var file = file_text_open_read("supporters.txt");
+    if (file >= 0)
+    {
+        while (!file_text_eof(file))
+        {
+            global.supporter[i++] = file_text_read_string(file);
+            file_text_readln(file);
+        }
+        file_text_close(file);
+    }
+}''',"supporters safe read")
+    return text
+
+def agree_step(text):
+    text=replace_exact(text,
+'''    var file = file_text_open_write(working_directory + "agreement.txt");
+    file_text_write_string(file, "Thank you, hope you enjoy the game!");
+    file_text_close(file);
+    game_restart();''',
+'''    var file = file_text_open_write("agreement.txt");
+    if (file >= 0)
+    {
+        file_text_write_string(file, "Thank you, hope you enjoy the game!");
+        file_text_close(file);
+        game_restart();
+    }''',"agreement writable sandbox")
+    return text
+
+def credits_draw(text):
+    text=replace_exact(text,
+'''var num = 0;
+var file = file_text_open_read("credits.txt");
+while (!file_text_eof(file))
+{
+    str[num++] = file_text_readln(file);
+}
+file_text_close(file);
+var length = array_length_1d(str);''',
+'''var num = 0;
+str = [];
+if (file_exists("credits.txt"))
+{
+    var file = file_text_open_read("credits.txt");
+    if (file >= 0)
+    {
+        while (!file_text_eof(file))
+        {
+            str[num++] = file_text_readln(file);
+        }
+        file_text_close(file);
+    }
+}
+var length = array_length_1d(str);''',"credits safe read")
+    return text
+
+def input_step(text):
+    text=replace_exact(text,
+'''if (instance_exists(o_player))
+{
+    var file = file_text_open_read("Input");
+    global.up = file_text_readln(file);
+    global.down = file_text_readln(file);
+    global.left = file_text_readln(file);
+    global.right = file_text_readln(file);
+    global.interact = file_text_readln(file);
+    global.attack = file_text_readln(file);
+    global.kick = file_text_readln(file);
+    global.taunt = file_text_readln(file);
+    global.dash = file_text_readln(file);
+    global.use_item1 = file_text_readln(file);
+    global.use_item2 = file_text_readln(file);
+    global.retry = file_text_readln(file);
+    global.horny = file_text_readln(file);
+    global.zoomset = file_text_readln(file);
+    global.mute = file_text_readln(file);
+    global.lockscene = file_text_readln(file);
+    global.fullscreen_b = file_text_readln(file);
+    global.cheat_health = file_text_readln(file);
+    global.cheat_remove_health = file_text_readln(file);
+    file_text_close(file);
+    get_input();
+}''',
+'''if (instance_exists(o_player))
+{
+    if (file_exists("Input"))
+    {
+        var file = file_text_open_read("Input");
+        if (file >= 0)
+        {
+            global.up = file_text_readln(file);
+            global.down = file_text_readln(file);
+            global.left = file_text_readln(file);
+            global.right = file_text_readln(file);
+            global.interact = file_text_readln(file);
+            global.attack = file_text_readln(file);
+            global.kick = file_text_readln(file);
+            global.taunt = file_text_readln(file);
+            global.dash = file_text_readln(file);
+            global.use_item1 = file_text_readln(file);
+            global.use_item2 = file_text_readln(file);
+            global.retry = file_text_readln(file);
+            global.horny = file_text_readln(file);
+            global.zoomset = file_text_readln(file);
+            global.mute = file_text_readln(file);
+            global.lockscene = file_text_readln(file);
+            global.fullscreen_b = file_text_readln(file);
+            global.cheat_health = file_text_readln(file);
+            global.cheat_remove_health = file_text_readln(file);
+            file_text_close(file);
+        }
+    }
+    get_input();
+}''',"Input safe read")
+    return text
+
+write_patch("gml_Object_o_menu_Create_0.gml",menu_create)
+write_patch("gml_Object_o_agree_main_Step_0.gml",agree_step)
+write_patch("gml_Object_o_credits_screen_Draw_0.gml",credits_draw)
+write_patch("gml_Object_input_Step_0.gml",input_step)
+
+# Final source-level assertions.
+joined="\n".join(p.read_text(encoding="utf-8") for p in out.glob("*.gml"))
+required=[
+    'file_exists("supporters.txt")',
+    'file_text_open_write("agreement.txt")',
+    'file_exists("credits.txt")',
+    'file_exists("Input")',
+]
+for token in required:
+    if token not in joined:
+        raise SystemExit("Missing final stability token: "+token)
+if 'working_directory + "agreement.txt"' in joined:
+    raise SystemExit("Unsafe Android agreement path survived")
+print("HHP_ANDROID_FILE_IO_FIX_OK")
