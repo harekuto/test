@@ -4,8 +4,8 @@ $final=$env:FINAL_APK
 if(!(Test-Path $final)){ throw 'Final APK missing' }
 $badging=Get-Content work/aapt-badging.txt -Raw
 if($badging -notmatch "name='com\.harekuto\.happyheartpanic'"){ throw 'package mismatch' }
-if($badging -notmatch "versionCode='200'"){ throw 'versionCode mismatch' }
-if($badging -notmatch "versionName='2025-android-v2'"){ throw 'versionName mismatch' }
+if($badging -notmatch "versionCode='300'"){ throw 'versionCode mismatch' }
+if($badging -notmatch "versionName='2025-android-v3'"){ throw 'versionName mismatch' }
 
 7z t $final | Tee-Object work/apk-zip-test.txt
 if($LASTEXITCODE -ne 0){ throw 'ZIP integrity failed' }
@@ -77,4 +77,4 @@ $size=(Get-Item $final).Length
 "RUNNER_TEMPLATE=2023.11.apk" | Tee-Object -Append work/final-hash.txt
 "GAME_VERSION=2023.8.0.0 BYTECODE=17 VM" | Tee-Object -Append work/final-hash.txt
 "GAME_DROID_STORED=$sz" | Tee-Object -Append work/final-hash.txt
-"FILE_IO_FIX=TRUE" | Tee-Object -Append work/final-hash.txt
+"FILE_IO_HARDENING=TRUE" | Tee-Object -Append work/final-hash.txt
