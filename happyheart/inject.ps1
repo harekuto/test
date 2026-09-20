@@ -41,7 +41,7 @@ $checks=@(
  'virtual_key_hhp_item2',
  'virtual_key_hhp_retry',
  'virtual_key_hhp_back',
- '"E / OK"',
+ '"OK / USE"',
  '"LIGHT"',
  '"HEAVY"',
  'file_exists("supporters.txt")',
