@@ -30,8 +30,11 @@ if(!$cli){ throw 'UTMT CLI missing' }
 ScriptMessage($"GM_EXACT={Data.GeneralInfo.Major}.{Data.GeneralInfo.Minor}.{Data.GeneralInfo.Release}.{Data.GeneralInfo.Build};BC={Data.GeneralInfo.BytecodeVersion};YYC={Data.IsYYC()}");
 ScriptMessage($"GAME_NAME={Data.GeneralInfo.Name.Content};DISPLAY={Data.GeneralInfo.DefaultWindowWidth}x{Data.GeneralInfo.DefaultWindowHeight}");
 ScriptMessage($"ROOMS={Data.Rooms.Count};OBJECTS={Data.GameObjects.Count};CODE={Data.Code.Count};SPRITES={Data.Sprites.Count};SOUNDS={Data.Sounds.Count}");
-foreach (var room in Data.Rooms.Take(30))
+for (int i = 0; i < Data.Rooms.Count && i < 30; i++)
+{
+    var room = Data.Rooms[i];
     ScriptMessage($"ROOM={room.Name.Content};SIZE={room.Width}x{room.Height}");
+}
 '@ | Set-Content work/meta.csx -Encoding UTF8
 
 & $cli.FullName load $data.FullName -s work/meta.csx -v 2>&1 | Tee-Object report/version-room.txt
