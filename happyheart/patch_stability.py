@@ -167,10 +167,98 @@ def input_step(text):
 }''',"Input safe read")
     return text
 
+
+def menu_step(text):
+    # Rebind-controls path: never read from an invalid handle.
+    text=replace_exact(text,
+'''        case 5:
+            var file = file_text_open_read("Input");
+            global.up = file_text_readln(file);''',
+'''        case 5:
+            var file = file_text_open_read("Input");
+            if (file < 0)
+            {
+                inmenu_control = false;
+                menu_selection = -1;
+                state = "idle";
+                break;
+            }
+            global.up = file_text_readln(file);''',"menu Input handle guard")
+
+    # Load-game path: savepoint is normally created by o_menu, but corrupted/
+    # inaccessible storage must not crash Android.
+    text=replace_exact(text,
+'''        case 7:
+            var file3 = file_text_open_read("savepoint");
+            target = file_text_readln(file3);''',
+'''        case 7:
+            var file3 = file_text_open_read("savepoint");
+            if (file3 < 0)
+            {
+                menu_selection = -1;
+                state = "idle";
+                break;
+            }
+            target = file_text_readln(file3);''',"menu savepoint handle guard")
+    return text
+
+def player_step(text):
+    text=replace_exact(text,
+'''    var file = file_text_open_read("savepoint");
+    target = file_text_readln(file);''',
+'''    var file = file_text_open_read("savepoint");
+    if (file < 0)
+    {
+        player_restart = false;
+        hascontrol = true;
+        state = "move";
+        exit;
+    }
+    target = file_text_readln(file);''',"player retry savepoint guard")
+    return text
+
+def savecontrols_script(text):
+    text=replace_exact(text,
+'''        var file2 = file_text_open_write("Input");
+        file_text_write_real(file2, global.up);''',
+'''        var file2 = file_text_open_write("Input");
+        if (file2 < 0)
+            exit;
+        file_text_write_real(file2, global.up);''',"savecontrols write guard")
+    return text
+
+def checkpoint_save(text):
+    text=replace_exact(text,
+'''    var file = file_text_open_write("savepoint");
+    file_text_write_real(file, global.checkpointroom);''',
+'''    var file = file_text_open_write("savepoint");
+    if (file < 0)
+    {
+        can_save = true;
+        exit;
+    }
+    file_text_write_real(file, global.checkpointroom);''',"checkpoint write guard")
+    return text
+
+def samtest_create(text):
+    text=replace_exact(text,
+'''if (directory_exists(working_directory + "/dlc/"))
+{
+    spr_ = sprite_add(working_directory + "dlc/dlc_sam.png", 6, false, false, sprite_width / 2, sprite_height);''',
+'''if (file_exists("dlc/dlc_sam.png"))
+{
+    spr_ = sprite_add("dlc/dlc_sam.png", 6, false, false, sprite_width / 2, sprite_height);''',"Android DLC included-file path")
+    return text
+
 write_patch("gml_Object_o_menu_Create_0.gml",menu_create)
 write_patch("gml_Object_o_agree_main_Step_0.gml",agree_step)
 write_patch("gml_Object_o_credits_screen_Draw_0.gml",credits_draw)
 write_patch("gml_Object_input_Step_0.gml",input_step)
+write_patch("gml_Object_o_menu_Step_0.gml",menu_step)
+write_patch("gml_Object_o_player_Step_0.gml",player_step)
+write_patch("gml_GlobalScript_savecontrols.gml",savecontrols_script)
+write_patch("gml_Object_o_checkpoint_Collision_o_player.gml",checkpoint_save)
+write_patch("gml_Object_o_samtest_Create_0.gml",samtest_create)
 
 # Final source-level assertions.
 joined="\n".join(p.read_text(encoding="utf-8") for p in out.glob("*.gml"))
@@ -179,6 +267,10 @@ required=[
     'file_text_open_write("agreement.txt")',
     'file_exists("credits.txt")',
     'file_exists("Input")',
+    'if (file < 0)',
+    'if (file3 < 0)',
+    'if (file2 < 0)',
+    'file_exists("dlc/dlc_sam.png")',
 ]
 for token in required:
     if token not in joined:
