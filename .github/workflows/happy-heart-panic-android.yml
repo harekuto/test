@@ -122,33 +122,21 @@ jobs:
           disable-linux-hw-accel: false
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
-            set -eu
-            APK="$(find apk -type f -name '*.apk' -print -quit)"
-            test -n "$APK"
-            adb install -r "$APK"
+            test -n "$(find apk -type f -name '*.apk' -print -quit)"
+            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
             adb logcat -c
-
-            # First launch: agreement screen should appear without crashing.
             adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 8
             adb shell pidof "$TEST_PACKAGE" | tee pid-agreement.txt
             test -s pid-agreement.txt
             adb exec-out screencap -p > hhp-agreement.png
-
-            # Accept agreement. The game restarts and must reach o_menu safely.
             adb shell input keyevent 66
             sleep 12
             adb shell pidof "$TEST_PACKAGE" | tee pid-menu.txt
             test -s pid-menu.txt
             adb exec-out screencap -p > hhp-menu.png
-
             adb logcat -d -v threadtime > hhp-menu-log.txt
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-menu-log.txt; then
-              cat hhp-menu-log.txt
-              exit 1
-            fi
-
-            # Default menu cursor is New Game. Enter must transition into gameplay.
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-menu-log.txt; then cat hhp-menu-log.txt; exit 1; fi
             adb shell input keyevent 66
             sleep 20
             adb shell pidof "$TEST_PACKAGE" | tee pid-gameplay.txt
@@ -156,13 +144,7 @@ jobs:
             adb exec-out screencap -p > hhp-gameplay.png
             adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > hhp-activity.txt || true
             adb logcat -d -v threadtime > hhp-final-log.txt
-
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-final-log.txt; then
-              cat hhp-final-log.txt
-              exit 1
-            fi
-
-            # Re-launch once to verify agreement persistence and writable save area.
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-final-log.txt; then cat hhp-final-log.txt; exit 1; fi
             adb shell am force-stop "$TEST_PACKAGE"
             adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 10
@@ -170,11 +152,7 @@ jobs:
             test -s pid-relaunch.txt
             adb exec-out screencap -p > hhp-relaunch.png
             adb logcat -d -v threadtime > hhp-relaunch-log.txt
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-relaunch-log.txt; then
-              cat hhp-relaunch-log.txt
-              exit 1
-            fi
-
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-relaunch-log.txt; then cat hhp-relaunch-log.txt; exit 1; fi
             echo HHP_RUNTIME_SMOKE_OK
 
       - name: Upload runtime QA
