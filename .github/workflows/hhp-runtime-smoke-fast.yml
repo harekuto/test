@@ -1,0 +1,80 @@
+name: Happy Heart Panic Fast Runtime QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hhp-runtime-smoke-fast.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Enable KVM
+        run: |
+          sudo sh -c 'echo KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm" > /etc/udev/rules.d/99-kvm4all.rules'
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; ls -l /dev/kvm; fi
+
+      - name: Download verified APK
+        uses: actions/download-artifact@v4
+        with:
+          name: Happy-Heart-Panic-2025-Android-v1
+          path: apk
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: harekuto/test
+          run-id: 35528882390
+
+      - name: Android 35 x86_64 launch and screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.happyheartpanic
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7_pro
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: |
+            set -euxo pipefail
+            APK="$(find apk -type f -name '*.apk' -print -quit)"
+            test -n "$APK"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 30
+            adb shell pidof "$TEST_PACKAGE" | tee hhp-pid.txt
+            test -s hhp-pid.txt
+            adb shell dumpsys activity activities | grep "$TEST_PACKAGE" > hhp-activity.txt || true
+            adb exec-out screencap -p > hhp-launch.png
+            test -s hhp-launch.png
+            adb logcat -d -v threadtime > hhp-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed' hhp-log.txt; then
+              cat hhp-log.txt
+              exit 1
+            fi
+            echo HHP_RUNTIME_SMOKE_OK
+
+      - name: Upload runtime QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Happy-Heart-Panic-fast-runtime-QA
+          path: |
+            hhp-pid.txt
+            hhp-activity.txt
+            hhp-launch.png
+            hhp-log.txt
+          if-no-files-found: ignore
+          retention-days: 30
