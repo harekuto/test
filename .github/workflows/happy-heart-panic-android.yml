@@ -124,6 +124,8 @@ jobs:
           script: |
             test -n "$(find apk -type f -name '*.apk' -print -quit)"
             adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
+            adb shell settings put secure immersive_mode_confirmations confirmed || true
+            adb shell settings put policy_control immersive.full=* || true
             adb logcat -c
             adb shell monkey -p "$TEST_PACKAGE" -c android.intent.category.LAUNCHER 1
             sleep 8
@@ -136,7 +138,7 @@ jobs:
             test -s pid-menu.txt
             adb exec-out screencap -p > hhp-menu.png
             adb logcat -d -v threadtime > hhp-menu-log.txt
-            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number' hhp-menu-log.txt; then cat hhp-menu-log.txt; exit 1; fi
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|File is not opened for reading|ERROR in[[:space:]]+action number|ANR in com\.harekuto\.happyheartpanic' hhp-menu-log.txt; then cat hhp-menu-log.txt; exit 1; fi
             adb shell input keyevent 66
             sleep 20
             adb shell pidof "$TEST_PACKAGE" | tee pid-gameplay.txt
