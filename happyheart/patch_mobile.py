@@ -71,8 +71,7 @@ s=s.replace('virtual_key_settings = virtual_key_add(-50, 5, 38, 50, 92);','virtu
 anchor='virtual_key_c = virtual_key_add((global.dual_controls == 1) ? cx2 : cx, (global.dual_controls == 1) ? cy2 : cy, 27 * button_scale, 29 * button_scale, 67);'
 custom=r'''
     // Core gameplay and menu actions from the game's real input map.
-    virtual_key_hhp_interact = virtual_key_add(hhp_ok_x, hhp_ok_y, hhp_ok_w, hhp_ok_h, 69); // E
-    virtual_key_hhp_enter = virtual_key_add(hhp_ok_x, hhp_ok_y, hhp_ok_w, hhp_ok_h, 13); // Enter
+    virtual_key_hhp_interact = virtual_key_add(hhp_ok_x, hhp_ok_y, hhp_ok_w, hhp_ok_h, 69); // E / OK
     virtual_key_hhp_dash = virtual_key_add(hhp_dash_x, hhp_dash_y, hhp_dash_w, hhp_dash_h, 32); // Space
     virtual_key_hhp_item1 = virtual_key_add(hhp_item1_x, hhp_item1_y, hhp_item1_w, hhp_item1_h, 65); // A
     virtual_key_hhp_item2 = virtual_key_add(hhp_item2_x, hhp_item2_y, hhp_item2_w, hhp_item2_h, 83); // S
@@ -91,7 +90,6 @@ cleanup=one("gml_Object_obj_mobilecontrols_button_CleanUp_0.gml","TouchControls_
 s=cleanup.read_text(encoding="utf-8-sig")
 delete=r'''
 virtual_key_delete(virtual_key_hhp_interact);
-virtual_key_delete(virtual_key_hhp_enter);
 virtual_key_delete(virtual_key_hhp_dash);
 virtual_key_delete(virtual_key_hhp_item1);
 virtual_key_delete(virtual_key_hhp_item2);
@@ -170,7 +168,7 @@ draw.write_text(s,encoding="utf-8")
 checks={
 mobile:["global.ui_state = 4;","global.mobile_prioritize_display = 1;"],
 create:["hhp_ok_x","zx = 1000;","downy = 685;","button_scale = 3.2;"],
-other:["virtual_key_hhp_interact","virtual_key_hhp_enter","virtual_key_hhp_dash","virtual_key_hhp_lock"],
+other:["virtual_key_hhp_interact","virtual_key_hhp_dash","virtual_key_hhp_lock"],
 cleanup:["virtual_key_hhp_interact"],
 draw:['"E / OK"','"DASH"','"ITEM 1"','"LIGHT"','"HEAVY"'],
 }
