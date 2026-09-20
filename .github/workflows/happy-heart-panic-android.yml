@@ -61,15 +61,15 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v3
-          path: dist/Happy-Heart-Panic-2025-Android-v3.apk
+          name: Happy-Heart-Panic-2025-Android-v4
+          path: dist/Happy-Heart-Panic-2025-Android-v4.apk
           compression-level: 0
           retention-days: 14
 
       - name: Upload static QA
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-v3-static-QA
+          name: Happy-Heart-Panic-Android-v4-static-QA
           path: |
             work/original-sha256.txt
             work/version-run.txt
@@ -104,7 +104,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v3
+          name: Happy-Heart-Panic-2025-Android-v4
           path: apk
 
       - name: Android 35 x86_64 launch, menu and gameplay smoke
@@ -160,7 +160,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-Android-v3-runtime-QA
+          name: Happy-Heart-Panic-Android-v4-runtime-QA
           path: |
             pid-agreement.txt
             pid-menu.txt
@@ -183,18 +183,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v3
+          name: Happy-Heart-Panic-2025-Android-v4
           path: dist
       - name: Publish tested release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: happy-heart-panic-android-v3
-          name: Happy Heart Panic 2025 Android v3 - Hardened Port
+          tag_name: happy-heart-panic-android-v4
+          name: Happy Heart Panic 2025 Android v4 - Touch/Input Fix
           body: |
             Fixed Android port based on the supplied GameMaker 2023.8.0.0 VM build.
             
-            v3 fixes the startup o_menu crash caused by supporters.txt, preserves required sidecar files, moves agreement.txt to writable GameMaker storage, hardens control/savepoint reads and writes against invalid file handles, and corrects the DLC included-file path for Android.
+            v4 keeps the hardened Android file-I/O fixes and corrects the mobile OK/USE control: one Enter virtual key now handles agreement/menu confirmation, while gameplay accepts Enter as an alternate interact input. This avoids overlapping virtual-key hitboxes and keeps the same visible button functional across menus and gameplay.
             
             This release is published only after the Android emulator passes first launch, agreement acceptance, o_menu/main-menu startup, New Game startup, relaunch, screenshot capture, and fatal Logcat checks.
-          files: dist/Happy-Heart-Panic-2025-Android-v3.apk
+          files: dist/Happy-Heart-Panic-2025-Android-v4.apk
           overwrite_files: true
