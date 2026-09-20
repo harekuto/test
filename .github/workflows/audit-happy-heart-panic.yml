@@ -1,0 +1,31 @@
+name: Audit Happy Heart Panic GameMaker Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-happy-heart-panic.yml'
+      - 'happyheart/audit.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run GameMaker audit
+        shell: pwsh
+        run: ./happyheart/audit.ps1
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: happy-heart-panic-gamemaker-audit
+          path: report/
+          retention-days: 7
