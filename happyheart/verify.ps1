@@ -14,7 +14,7 @@ $list=Get-Content work/apk-list.txt -Raw
 if($list -notmatch 'assets\\game\.droid'){ throw 'game.droid missing' }
 if($list -notmatch 'assets\\dlc\\maxwell\.gif'){ throw 'DLC asset missing' }
 if($list -notmatch 'lib\\arm64-v8a\\libyoyo\.so'){ throw 'arm64 runner missing' }
-if($list -notmatch 'lib\\x86\\libyoyo\.so'){ throw 'x86 runner missing' }
+if($list -notmatch 'lib\\x86_64\\libyoyo\.so'){ throw 'x86_64 runner missing' }
 
 7z l -slt $final | Tee-Object work/apk-list-slt.txt | Out-Null
 $current=''
