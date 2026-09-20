@@ -98,8 +98,8 @@ jobs:
         env:
           TEST_PACKAGE: com.harekuto.happyheartpanic
         with:
-          api-level: 29
-          arch: x86
+          api-level: 35
+          arch: x86_64
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
