@@ -1,0 +1,33 @@
+name: Audit Happy Heart Panic File IO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-hhp-fileio.yml'
+      - 'happyheart/audit_fileio.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Audit file IO
+        shell: pwsh
+        run: ./happyheart/audit_fileio.ps1
+      - name: Upload file IO audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: happy-heart-panic-fileio-audit
+          path: report/
+          if-no-files-found: ignore
+          retention-days: 7
