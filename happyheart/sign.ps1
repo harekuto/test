@@ -11,7 +11,7 @@ $key='work/hhp.keystore'
 keytool -genkeypair -keystore $key -storepass $pass -keypass $pass -alias hhp -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Happy Heart Panic Android,O=Harekuto,C=KZ'
 & $zipalign -f -p 4 work/unsigned.apk work/aligned.apk
 if($LASTEXITCODE -ne 0){ throw 'zipalign failed' }
-$final=Join-Path $PWD 'dist/Happy-Heart-Panic-2025-Android-v1.apk'
+$final=Join-Path $PWD 'dist/Happy-Heart-Panic-2025-Android-v2.apk'
 & $apksigner sign --ks $key --ks-key-alias hhp --ks-pass "pass:$pass" --key-pass "pass:$pass" --out $final work/aligned.apk
 if($LASTEXITCODE -ne 0){ throw 'sign failed' }
 & $apksigner verify --verbose --print-certs $final | Tee-Object work/signature.txt
