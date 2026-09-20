@@ -51,7 +51,8 @@ $checks=@(
  'if (file < 0)',
  'if (file3 < 0)',
  'if (file2 < 0)',
- 'file_exists("dlc/dlc_sam.png")'
+ 'file_exists("dlc/dlc_sam.png")',
+ 'keyboard_check_pressed(vk_enter)'
 )
 foreach($c in $checks){
   $m=@($gml | Select-String -SimpleMatch $c)
