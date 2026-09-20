@@ -176,4 +176,4 @@ for p,needles in checks.items():
     t=p.read_text(encoding="utf-8")
     for n in needles:
         if n not in t: raise SystemExit(f"Patch validation failed: {p} missing {n}")
-    print("PATCHED",p)
+    print("PATCHED",p.name)
