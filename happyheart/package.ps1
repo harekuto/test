@@ -1,8 +1,8 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $env:HHP_PACKAGE='com.harekuto.happyheartpanic'
-$env:HHP_VERSION='2025-android-v1'
-$env:HHP_VCODE='100'
+$env:HHP_VERSION='2025-android-v2'
+$env:HHP_VCODE='200'
 
 $apktool=Get-ChildItem work/mobiler -Recurse -Filter 'apktool_3.0.3.jar' | Select-Object -First 1
 if(!$apktool){ throw 'apktool missing' }
@@ -15,6 +15,17 @@ python happyheart/patch_apk.py work/apkdecoded
 New-Item -ItemType Directory -Force work/apkdecoded/assets | Out-Null
 Remove-Item work/apkdecoded/assets/game.droid -Force -ErrorAction SilentlyContinue
 Copy-Item $env:MOBILE_WIN work/apkdecoded/assets/game.droid -Force
+
+# Preserve every static sidecar file the Windows game opens at runtime.
+$sidecars=@('supporters.txt','credits.txt','CONTROLS.txt')
+Remove-Item work/sidecar-hashes.txt -Force -ErrorAction SilentlyContinue
+foreach($name in $sidecars){
+  $src=Join-Path $env:GAME_DIR $name
+  if(!(Test-Path $src)){ throw "Required original sidecar missing: $name" }
+  Copy-Item $src (Join-Path 'work/apkdecoded/assets' $name) -Force
+  $h=(Get-FileHash $src -Algorithm SHA256).Hash.ToLower()
+  "$name=$h" | Add-Content work/sidecar-hashes.txt
+}
 
 $dlc=Join-Path $env:GAME_DIR 'dlc'
 if(Test-Path $dlc){
