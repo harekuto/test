@@ -33,7 +33,7 @@ jobs:
           path: apk
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: harekuto/test
-          run-id: 35531382485
+          run-id: 35532440825
 
       - name: Real touch agreement -> menu -> gameplay QA
         uses: reactivecircus/android-emulator-runner@v2
