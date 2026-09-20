@@ -107,6 +107,18 @@ if (file_exists("credits.txt"))
 var length = array_length_1d(str);''',"credits safe read")
     return text
 
+def gameplay_input(text):
+    text=replace_exact(text,
+'''            if (keyboard_check_pressed(_interact) || gamepad_button_check_pressed(4, gp_face1))
+            {
+                interact = 1;
+            }''',
+'''            if (keyboard_check_pressed(_interact) || keyboard_check_pressed(vk_enter) || gamepad_button_check_pressed(4, gp_face1))
+            {
+                interact = 1;
+            }''',"Enter as Android gameplay interact")
+    return text
+
 def input_step(text):
     text=replace_exact(text,
 '''if (instance_exists(o_player))
@@ -253,7 +265,7 @@ def samtest_create(text):
 write_patch("gml_Object_o_menu_Create_0.gml",menu_create)
 write_patch("gml_Object_o_agree_main_Step_0.gml",agree_step)
 write_patch("gml_Object_o_credits_screen_Draw_0.gml",credits_draw)
-write_patch("gml_Object_input_Step_0.gml",input_step)
+write_patch("gml_Object_input_Step_0.gml",input_step)\nwrite_patch("gml_GlobalScript_get_input.gml",gameplay_input)
 write_patch("gml_Object_o_menu_Step_0.gml",menu_step)
 write_patch("gml_Object_o_player_Step_0.gml",player_step)
 write_patch("gml_GlobalScript_savecontrols.gml",savecontrols_script)
@@ -271,6 +283,7 @@ required=[
     'if (file3 < 0)',
     'if (file2 < 0)',
     'file_exists("dlc/dlc_sam.png")',
+    'keyboard_check_pressed(vk_enter)',
 ]
 for token in required:
     if token not in joined:
