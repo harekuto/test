@@ -4,8 +4,8 @@ $final=$env:FINAL_APK
 if(!(Test-Path $final)){ throw 'Final APK missing' }
 $badging=Get-Content work/aapt-badging.txt -Raw
 if($badging -notmatch "name='com\.harekuto\.happyheartpanic'"){ throw 'package mismatch' }
-if($badging -notmatch "versionCode='400'"){ throw 'versionCode mismatch' }
-if($badging -notmatch "versionName='2025-android-v4'"){ throw 'versionName mismatch' }
+if($badging -notmatch "versionCode='500'"){ throw 'versionCode mismatch' }
+if($badging -notmatch "versionName='2025-android-v5'"){ throw 'versionName mismatch' }
 
 7z t $final | Tee-Object work/apk-zip-test.txt
 if($LASTEXITCODE -ne 0){ throw 'ZIP integrity failed' }
