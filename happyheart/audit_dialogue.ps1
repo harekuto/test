@@ -6,7 +6,11 @@ New-Item -ItemType Directory -Force work/dialogue-audit | Out-Null
 
 Remove-Item work/dialogue-dump -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force work/dialogue-dump | Out-Null
-& $env:UTMT_CLI dump $env:DATA_WIN -c UMT_DUMP_ALL -o work/dialogue-dump 2>&1 | Tee-Object work/dialogue-audit/dump-log.txt
+$data=Get-ChildItem work/game -Recurse -Filter data.win | Select-Object -First 1
+if(!$data){ throw 'data.win missing after prepare' }
+$cli=Get-ChildItem work/utmt -Recurse -Filter UndertaleModCli.exe | Select-Object -First 1
+if(!$cli){ throw 'UTMT CLI missing after prepare' }
+& $cli.FullName dump $data.FullName -c UMT_DUMP_ALL -o work/dialogue-dump 2>&1 | Tee-Object work/dialogue-audit/dump-log.txt
 if($LASTEXITCODE -ne 0){ throw 'UTMT dialogue dump failed' }
 
 $gml=Get-ChildItem work/dialogue-dump -Recurse -Filter *.gml
