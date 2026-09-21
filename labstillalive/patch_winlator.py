@@ -261,7 +261,7 @@ public final class LabStillAliveBootstrap {
             byte[] buffer = new byte[1024 * 1024];
             String canonicalRoot = destination.getCanonicalPath() + File.separator;
             while ((entry = zin.getNextEntry()) != null) {
-                String name = entry.getName().replace('\\\\', '/');
+                String name = entry.getName().replace('\\', '/');
                 if (name.startsWith("/") || name.contains("../")) {
                     throw new SecurityException("Unsafe payload path: " + name);
                 }
