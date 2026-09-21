@@ -30,14 +30,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm || true
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
 
-      - name: Download hardened v4 APK
+      - name: Download hardened v5 APK
         uses: actions/download-artifact@v4
         with:
-          name: Happy-Heart-Panic-2025-Android-v4
+          name: Happy-Heart-Panic-2025-Android-v5
           path: apk
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: harekuto/test
-          run-id: 35533924000
+          run-id: 35614081031
 
       - name: Real touch agreement -> menu -> gameplay QA
         uses: reactivecircus/android-emulator-runner@v2
@@ -57,7 +57,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Happy-Heart-Panic-v4-real-touch-flow-QA
+          name: Happy-Heart-Panic-v5-real-touch-flow-QA
           path: |
             agreement.png
             menu.png
