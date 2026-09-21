@@ -1,0 +1,95 @@
+name: Build LAB Still Alive Android Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-still-alive-android.yml'
+      - 'labstillalive/patch_winlator.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-still-alive-android-runtime
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout pinned Winlator 11.2 source
+        run: |
+          git clone --filter=blob:none https://github.com/brunodev85/winlator-app.git winlator
+          cd winlator
+          git checkout a030f552f452158a2db64fdb32b490fa19c0b48d
+
+      - name: Patch dedicated LAB launcher
+        run: |
+          python labstillalive/patch_winlator.py winlator
+          grep -R "LAB_PATCH_OK" /dev/null || true
+          grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
+          grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
+          test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
+          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-lab.icp
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android native build dependencies
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;24.0.8215888" "cmake;3.22.1"
+
+      - name: Build dedicated runtime APK
+        working-directory: winlator
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon clean :app:assembleDebug
+
+      - name: Verify generic runtime APK
+        run: |
+          set -euxo pipefail
+          APK="$(find winlator/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee lab-runtime-badging.txt
+          grep -q "package: name='com.harekuto.labstillalive'" lab-runtime-badging.txt
+          unzip -l "$APK" | tee lab-runtime-list.txt
+          grep -q 'assets/inputcontrols/profiles/controls-lab.icp' lab-runtime-list.txt
+          if grep -q 'assets/lab_payload.zip' lab-runtime-list.txt; then
+            echo "Payload unexpectedly present in generic runtime"
+            exit 1
+          fi
+          cp "$APK" LAB-Still-Alive-Android-runtime-unsigned-payload.apk
+          sha256sum LAB-Still-Alive-Android-runtime-unsigned-payload.apk | tee lab-runtime-sha256.txt
+
+      - name: Package local signing tools
+        run: |
+          mkdir -p signing-tools
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" signing-tools/
+          cp -a "$ANDROID_HOME/build-tools/35.0.0/lib" signing-tools/
+          cp -a "$ANDROID_HOME/build-tools/35.0.0/lib64" signing-tools/ 2>/dev/null || true
+          chmod +x signing-tools/apksigner signing-tools/zipalign
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-Android-runtime
+          path: |
+            LAB-Still-Alive-Android-runtime-unsigned-payload.apk
+            lab-runtime-badging.txt
+            lab-runtime-list.txt
+            lab-runtime-sha256.txt
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Android-signing-tools
+          path: signing-tools/
+          retention-days: 14
