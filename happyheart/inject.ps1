@@ -62,6 +62,14 @@ foreach($c in $checks){
 $unsafe=@($gml | Select-String -SimpleMatch 'working_directory + "agreement.txt"')
 if($unsafe.Count -gt 0){ throw 'Unsafe agreement working_directory path survived stability patch' }
 
+$getInput=Get-ChildItem work/verify -Recurse -Filter 'gml_GlobalScript_get_input.gml' | Select-Object -First 1
+if(!$getInput){ throw 'Final get_input decompile missing' }
+$getInputText=Get-Content $getInput.FullName -Raw
+$enterInteract='keyboard_check_pressed(_interact) || keyboard_check_pressed(vk_enter) || gamepad_button_check_pressed(4, gp_face1)'
+$enterCount=([regex]::Matches($getInputText,[regex]::Escape($enterInteract))).Count
+"ENTER_INTERACT_BRANCHES=$enterCount" | Add-Content work/control-verification.txt
+if($enterCount -lt 3){ throw "Expected Enter fallback in all 3 interact/talk branches, got $enterCount" }
+
 try {
   Add-Type -AssemblyName System.Drawing
   $exe=Get-ChildItem $env:GAME_DIR -Filter *.exe | Select-Object -First 1
