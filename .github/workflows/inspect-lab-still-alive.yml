@@ -1,0 +1,43 @@
+name: Inspect LAB Still Alive Windows Build
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-lab-still-alive.yml'
+      - 'labstillalive/inspect.py'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full
+      - name: Download uploaded archive mirror
+        uses: actions/download-artifact@v4
+        with:
+          name: lab-still-alive-source
+          path: source
+        continue-on-error: true
+      - name: Fetch source from release asset if artifact unavailable
+        if: always()
+        shell: bash
+        run: |
+          if [ ! -f source/game.rar ]; then
+            echo "SOURCE_MISSING"
+            exit 2
+          fi
+      - name: Inspect
+        run: |
+          mkdir -p report
+          python labstillalive/inspect.py source/game.rar report | tee report/console.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-still-alive-inspection
+          path: report/
+          retention-days: 7
