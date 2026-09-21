@@ -108,15 +108,14 @@ var length = array_length_1d(str);''',"credits safe read")
     return text
 
 def gameplay_input(text):
-    text=replace_exact(text,
-'''            if (keyboard_check_pressed(_interact) || gamepad_button_check_pressed(4, gp_face1))
-            {
-                interact = 1;
-            }''',
-'''            if (keyboard_check_pressed(_interact) || keyboard_check_pressed(vk_enter) || gamepad_button_check_pressed(4, gp_face1))
-            {
-                interact = 1;
-            }''',"Enter as Android gameplay interact")
+    old_cond = 'keyboard_check_pressed(_interact) || gamepad_button_check_pressed(4, gp_face1)'
+    new_cond = 'keyboard_check_pressed(_interact) || keyboard_check_pressed(vk_enter) || gamepad_button_check_pressed(4, gp_face1)'
+    count = text.count(old_cond)
+    if count < 3:
+        raise SystemExit(f"Expected at least 3 interact/talk paths, got {count}")
+    text = text.replace(old_cond, new_cond)
+    if text.count('keyboard_check_pressed(vk_enter)') < 3:
+        raise SystemExit("Enter fallback did not reach all interact/talk branches")
     return text
 
 def input_step(text):
