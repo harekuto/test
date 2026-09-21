@@ -1,0 +1,35 @@
+name: Audit HHP Dialogue Interact
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/audit-hhp-dialogue.yml'
+      - 'happyheart/audit_dialogue.ps1'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Audit dialogue input
+        shell: pwsh
+        run: ./happyheart/audit_dialogue.ps1
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: hhp-dialogue-interact-audit
+          path: work/dialogue-audit/
+          retention-days: 7
