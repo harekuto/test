@@ -7,9 +7,23 @@ test -n "$PKG"
 
 adb install -r "$APK"
 adb shell settings put secure immersive_mode_confirmations confirmed || true
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am force-stop com.google.android.apps.nexuslauncher || true
+adb shell am force-stop com.android.launcher3 || true
+adb shell input keyevent 4 || true
 adb logcat -c
-adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null
+
+ACTIVITY="$(adb shell cmd package resolve-activity --brief "$PKG" | tail -1 | tr -d '\r')"
+test -n "$ACTIVITY"
+echo "$ACTIVITY" > resolved-activity.txt
+adb shell am start -W -n "$ACTIVITY" > activity-start.txt
 sleep 12
+
+adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' > focus-after-start.txt || true
+if grep -Eqi 'AppNotResponding|Quickstep|launcher3|nexuslauncher|Application Error' focus-after-start.txt; then
+  adb shell input keyevent 4 || true
+  sleep 2
+fi
 
 adb shell pidof "$PKG" > player-pid.txt 2>/dev/null || true
 adb exec-out screencap -p > player-start.png || true
