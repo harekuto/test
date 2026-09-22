@@ -86,6 +86,7 @@ anim_timer = 0;
 state_run = false;
 last_mv = 0;
 jump_count = 0;
+jump_was_down = false;
 
 idle_x = [1,2,3,0,0,1,2];
 idle_y = [0,0,0,0,1,1,1];
@@ -129,12 +130,14 @@ else if (state_run)
     anim_timer = 0;
 }
 
-if (keyboard_check_pressed(ord(""X"")) && py >= 350)
+var jump_down = keyboard_check(ord(""X""));
+if (jump_down && !jump_was_down && py >= 350)
 {
     vy = -7.2;
     jump_count += 1;
     show_debug_message(""LAB_JUMP_TRIGGERED="" + string(jump_count) + "" PY="" + string(py));
 }
+jump_was_down = jump_down;
 
 vy += 0.36;
 py += vy;
