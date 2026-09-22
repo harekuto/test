@@ -1,0 +1,40 @@
+name: Inspect GameMaker Android Runner Template
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-gm-runner-template.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download runner APK
+        run: |
+          set -eux
+          curl -L --fail --retry 3             'https://raw.githubusercontent.com/znm2500/GameMaker-Mobiler/main/GMS2%20APK/2024.14.apk'             -o runner.apk
+          ls -lh runner.apk
+          sha256sum runner.apk
+      - name: Inspect APK contents
+        run: |
+          set -eux
+          unzip -l runner.apk | tee runner-list.txt
+          echo '--- game data candidates ---'
+          grep -Ei 'game\.droid|data\.win|assets/.*\.(win|droid)|libyoyo|yoyo' runner-list.txt || true
+          mkdir -p inspect
+          unzip -q runner.apk -d inspect
+          find inspect -maxdepth 3 -type f -printf '%P %s bytes\n' | sort | tee inspect-files.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gm-runner-template-inspection
+          path: |
+            runner-list.txt
+            inspect-files.txt
+          retention-days: 7
