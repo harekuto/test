@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/lab-native-bootstrap.yml'
       - 'labnative/create_bootstrap.csx'
+      - 'labnative/smoke_bootstrap.sh'
 
 permissions:
   contents: read
@@ -104,6 +105,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: LAB-Native-GameMaker-Bootstrap
@@ -127,25 +129,7 @@ jobs:
           heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
-          script: |
-            bash -lc '
-              set -euxo pipefail
-              APK="$(find artifact -name "*.apk" -print -quit)"
-              PKG="$(cat artifact/package.txt)"
-              adb install -r "$APK"
-              adb logcat -c
-              adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
-              sleep 12
-              adb shell pidof "$PKG" | tee smoke-pid.txt
-              test -s smoke-pid.txt
-              adb exec-out screencap -p > bootstrap.png
-              adb logcat -d -v threadtime > smoke-log.txt
-              if grep -E -i "FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed" smoke-log.txt; then
-                cat smoke-log.txt
-                exit 1
-              fi
-              echo LAB_NATIVE_BOOTSTRAP_SMOKE_OK
-            '
+          script: bash labnative/smoke_bootstrap.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
