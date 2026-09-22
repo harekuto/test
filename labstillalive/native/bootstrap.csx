@@ -11,17 +11,49 @@ Data.GeneralInfo.DisplayName = Data.Strings.MakeString("LAB Still Alive Native")
 Data.GeneralInfo.Config = Data.Strings.MakeString("Default");
 Data.GeneralInfo.DefaultWindowWidth = 640;
 Data.GeneralInfo.DefaultWindowHeight = 480;
-Data.GeneralInfo.BytecodeVersion = 16;
+Data.SetGMS2Version(2, 2, 2, 302);
+Data.GeneralInfo.BytecodeVersion = 17;
 Data.GeneralInfo.GMS2FPS = 60.0f;
+Data.BuiltinList = new BuiltinList(Data);
 
 var room = Data.Rooms[0];
 room.Name = Data.Strings.MakeString("rm_bootstrap");
 room.Caption = Data.Strings.MakeString("LAB Still Alive Native Bootstrap");
 room.Width = 640;
 room.Height = 480;
-room.Speed = 60;
+room.Speed = 0;
 room.BackgroundColor = 0xFF000000;
 room.DrawBackgroundColor = true;
+room.Flags = UndertaleRoom.RoomEntryFlags.EnableViews
+           | UndertaleRoom.RoomEntryFlags.ClearViewBackground
+           | UndertaleRoom.RoomEntryFlags.IsGMS2;
+room.Layers.Clear();
+
+var instancesLayer = new UndertaleRoom.Layer()
+{
+    LayerName = Data.Strings.MakeString("Instances"),
+    LayerId = 1,
+    LayerDepth = 0,
+    LayerType = UndertaleRoom.LayerType.Instances,
+    IsVisible = true,
+    Data = Activator.CreateInstance<UndertaleRoom.Layer.LayerInstancesData>()
+};
+room.Layers.Add(instancesLayer);
+
+var backgroundLayer = new UndertaleRoom.Layer()
+{
+    LayerName = Data.Strings.MakeString("Background"),
+    LayerId = 2,
+    LayerDepth = 100,
+    LayerType = UndertaleRoom.LayerType.Background,
+    IsVisible = true
+};
+var bgData = Activator.CreateInstance<UndertaleRoom.Layer.LayerBackgroundData>();
+bgData.Visible = true;
+bgData.Color = 0xFF000000;
+bgData.AnimationSpeed = 15;
+backgroundLayer.Data = bgData;
+room.Layers.Add(backgroundLayer);
 
 Data.GeneralInfo.RoomOrder.Clear();
 Data.GeneralInfo.RoomOrder.Add(new UndertaleResourceById<UndertaleRoom, UndertaleChunkROOM>() { Resource = room });
@@ -42,6 +74,8 @@ var inst = new UndertaleRoom.GameObject()
     Y = 0
 };
 room.GameObjects.Add(inst);
+instancesLayer.InstancesData.Instances.Add(inst);
+room.SetupRoom();
 
 var importGroup = new CodeImportGroup(Data)
 {
@@ -69,4 +103,4 @@ if (mouse_check_button(mb_left))
 
 importGroup.Import();
 
-ScriptMessage($"BOOTSTRAP_OBJECTS={Data.GameObjects.Count};ROOMS={Data.Rooms.Count};ROOMORDER={Data.GeneralInfo.RoomOrder.Count};BC={Data.GeneralInfo.BytecodeVersion}");
+ScriptMessage($"BOOTSTRAP_OBJECTS={Data.GameObjects.Count};ROOMS={Data.Rooms.Count};ROOMORDER={Data.GeneralInfo.RoomOrder.Count};GMS2={Data.IsGameMaker2()};VERSION={Data.GeneralInfo.Major}.{Data.GeneralInfo.Minor}.{Data.GeneralInfo.Release}.{Data.GeneralInfo.Build};BC={Data.GeneralInfo.BytecodeVersion};LAYERS={room.Layers.Count}");
