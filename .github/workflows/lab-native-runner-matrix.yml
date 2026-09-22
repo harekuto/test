@@ -1,0 +1,82 @@
+name: LAB Native GameMaker Runner Matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-runner-matrix.yml'
+      - 'labnative/runner_matrix.sh'
+      - 'labnative/create_bootstrap.csx'
+
+permissions:
+  contents: read
+
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare UTMT
+        run: |
+          set -eux
+          curl -L --fail --retry 3 'https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.2.0/UTMT_CLI_v0.9.2.0-Ubuntu.zip' -o utmt.zip
+          mkdir utmt
+          unzip -q utmt.zip -d utmt
+          UTMT="$(find utmt -type f \( -name 'UndertaleModCli' -o -name 'UndertaleModCLI' \) -print -quit)"
+          chmod +x "$UTMT"
+          echo "UTMT=$UTMT" >> "$GITHUB_ENV"
+      - name: Generate native GameMaker data
+        run: |
+          set -eux
+          "$UTMT" new -o blank.win
+          "$UTMT" load blank.win -s labnative/create_bootstrap.csx -o game.droid -f -v
+          "$UTMT" info game.droid -v | tee game-info.txt
+          "$UTMT" dump game.droid -c UMT_DUMP_ALL -o dump >/dev/null
+          grep -R -n 'BOOTSTRAP_OK' dump | tee bootstrap-proof.txt
+          test -s bootstrap-proof.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-native-generated-data
+          path: |
+            game.droid
+            game-info.txt
+            bootstrap-proof.txt
+          retention-days: 7
+
+  matrix:
+    needs: data
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lab-native-generated-data
+          path: artifact
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+      - name: Test GameMaker runner compatibility
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: bash labnative/runner_matrix.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-native-runner-matrix-results
+          path: matrix/
+          if-no-files-found: ignore
+          retention-days: 30
