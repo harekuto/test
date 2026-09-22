@@ -8,7 +8,7 @@ on:
       - '.github/workflows/lab-native-extract-assets.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   extract:
@@ -29,7 +29,7 @@ jobs:
         run: |
           set -eux
           mkdir -p work/game work/assets
-          gdown 'https://drive.google.com/uc?id=16jP6BmHNz6oeKd_yNS5EhQh1r2isOhOf' -O work/LAB.rar
+          curl -L --fail --retry 3 'https://sdmntpritalynorth.oaiusercontent.com/files/00000000-704c-8246-b9cd-d842e1bdbdd2/raw?se=2026-09-22T18%3A34%3A04Z&sp=r&sv=2026-02-06&sr=b&scid=fb61953d-578b-5312-88c2-c4a88ce91653&skoid=5bfb38a5-43fb-4c63-80a1-6ae1e97e2e16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-22T17%3A06%3A57Z&ske=2026-09-23T17%3A06%3A57Z&sks=b&skv=2026-02-06&sig=t%2BzUAsEKGkAeK0enDnokZ0zQyWFowAwKjkMU2IWhU8g%3D' -o work/LAB.rar
           test -s work/LAB.rar
           sha256sum work/LAB.rar | tee work/original-sha256.txt
           7z x -y work/LAB.rar -owork/game >/dev/null
@@ -71,16 +71,35 @@ jobs:
           print("textures",len(rows))
           PY
         shell: bash
+      - name: Package stable extracted asset archive
+        run: |
+          set -eux
+          cd work
+          7z a -tzip -mx=1 LAB-ACTKOOL-Native-Assets-v1.zip assets/ original-sha256.txt game-files.txt asset-files.txt counts.txt texture-metadata.json extractor.log
+          sha256sum LAB-ACTKOOL-Native-Assets-v1.zip | tee asset-pack-sha256.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: LAB-ACTKOOL-Native-Assets
           path: |
-            work/assets/
+            work/LAB-ACTKOOL-Native-Assets-v1.zip
             work/original-sha256.txt
             work/game-files.txt
             work/asset-files.txt
             work/counts.txt
             work/texture-metadata.json
             work/extractor.log
+            work/asset-pack-sha256.txt
           compression-level: 0
           retention-days: 14
+
+      - name: Publish stable native asset pack
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-actkool-native-assets-v1
+          name: LAB Still Alive ACTKOOL Native Assets v1
+          body: |
+            Extracted native asset pack from the original LAB Still Alive v1.25 ACTKOOL archive.
+            Used by the native GameMaker Android reconstruction pipeline.
+          files: work/LAB-ACTKOOL-Native-Assets-v1.zip
+          overwrite_files: true
