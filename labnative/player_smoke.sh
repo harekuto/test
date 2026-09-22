@@ -77,6 +77,17 @@ if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|Fatal signa
   exit 1
 fi
 
+grep -F 'LAB_INPUT_MV=1' player-final-log.txt > /dev/null || {
+  echo "Native RIGHT movement marker missing"
+  grep -E 'LAB_INPUT|LAB_JUMP|yoyo' player-final-log.txt | tail -200 || true
+  exit 1
+}
+grep -F 'LAB_JUMP_TRIGGERED=' player-final-log.txt > /dev/null || {
+  echo "Native JUMP marker missing"
+  grep -E 'LAB_INPUT|LAB_JUMP|yoyo' player-final-log.txt | tail -200 || true
+  exit 1
+}
+
 echo "START_SHA=$START_SHA" > player-screen-hashes.txt
 echo "RIGHT_SHA=$RIGHT_SHA" >> player-screen-hashes.txt
 echo "JUMP_SHA=$(sha256sum player-after-jump.png | awk '{print $1}')" >> player-screen-hashes.txt
