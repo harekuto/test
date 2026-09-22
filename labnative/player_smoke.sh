@@ -48,8 +48,8 @@ coord() {
 
 RIGHT="$(coord RIGHT)"
 JUMP="$(coord JUMP)"
-RX="\${RIGHT%,*}"; RY="\${RIGHT#*,}"
-JX="\${JUMP%,*}"; JY="\${JUMP#*,}"
+RX="${RIGHT%,*}"; RY="${RIGHT#*,}"
+JX="${JUMP%,*}"; JY="${JUMP#*,}"
 
 START_SHA="$(sha256sum player-start.png | awk '{print $1}')"
 
