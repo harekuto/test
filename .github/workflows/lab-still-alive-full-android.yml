@@ -1,0 +1,159 @@
+name: LAB Still Alive Full Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-still-alive-full-android.yml'
+      - 'labstillalive/patch_winlator.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-still-alive-full-android
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install host tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libarchive-tools zip unzip
+          python -m pip install --disable-pip-version-check --no-input 'gdown==5.2.0'
+
+      - name: Download and verify original LAB v1.25
+        run: |
+          set -euxo pipefail
+          mkdir -p work/game
+          gdown --fuzzy 'https://drive.google.com/file/d/16oZFmo20ScvtKu_QGq52UmQQ1a-efC87/view?usp=drivesdk' -O work/LAB-v1.25.rar
+          test "$(stat -c%s work/LAB-v1.25.rar)" -eq 101930988
+          echo '9f5a8b85b7d7d05792e88517b859b64bf7206a24e50041e788ff9c36bba0dd2a  work/LAB-v1.25.rar' | sha256sum -c -
+          bsdtar -xf work/LAB-v1.25.rar -C work/game
+          ROOT='work/game/LAB-Still Alive- Ver.1.25'
+          test -f "$ROOT/LAB-Still Alive- Ver.1.25.exe"
+          test "$(stat -c%s "$ROOT/LAB-Still Alive- Ver.1.25.exe")" -eq 978944
+          test "$(stat -c%s "$ROOT/LAB-Still Alive- Ver.1.25.actbin")" -eq 36982944
+          test "$(stat -c%s "$ROOT/LAB-Still Alive- Ver.1.25.actstr")" -eq 77116800
+          test "$(stat -c%s "$ROOT/LAB-Still Alive- Ver.1.25.ini")" -eq 687
+
+      - name: Create deterministic in-APK game payload
+        run: |
+          set -euxo pipefail
+          ROOT="$GITHUB_WORKSPACE/work/game/LAB-Still Alive- Ver.1.25"
+          mkdir -p work/payload
+          cp "$ROOT/LAB-Still Alive- Ver.1.25.exe" work/payload/
+          cp "$ROOT/LAB-Still Alive- Ver.1.25.actbin" work/payload/
+          cp "$ROOT/LAB-Still Alive- Ver.1.25.actstr" work/payload/
+          cp "$ROOT/LAB-Still Alive- Ver.1.25.ini" work/payload/
+          cp "$ROOT/_memory1.actsave" work/payload/ 2>/dev/null || true
+          (
+            cd work/payload
+            zip -0 -q -X -r ../lab_payload.zip .
+          )
+          unzip -t work/lab_payload.zip
+          unzip -l work/lab_payload.zip | tee work/payload-list.txt
+          sha256sum work/lab_payload.zip | tee work/payload-sha256.txt
+
+      - name: Checkout pinned Winlator 11.2 runtime
+        run: |
+          set -euxo pipefail
+          git clone --filter=blob:none https://github.com/brunodev85/winlator-app.git winlator
+          cd winlator
+          git checkout a030f552f452158a2db64fdb32b490fa19c0b48d
+
+      - name: Patch dedicated LAB launcher and inject original game
+        run: |
+          set -euxo pipefail
+          python labstillalive/patch_winlator.py winlator
+          test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
+          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-lab.icp
+          mkdir -p winlator/app/src/main/assets
+          cp work/lab_payload.zip winlator/app/src/main/assets/lab_payload.zip
+          cp work/payload-sha256.txt winlator/app/src/main/assets/lab_payload_sha256.txt
+          grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
+          grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
+
+      - name: Install Android build dependencies
+        run: |
+          set -euxo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             "platforms;android-35"             "build-tools;35.0.0"             "ndk;24.0.8215888"             "cmake;3.22.1"
+
+      - name: Build full dedicated APK
+        working-directory: winlator
+        run: |
+          set -euxo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon clean :app:assembleDebug
+
+      - name: Deep verify APK, embedded payload and signature
+        run: |
+          set -euxo pipefail
+          APK="$(find winlator/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          test -n "$APK"
+          test -s "$APK"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          ZIPALIGN="$ANDROID_HOME/build-tools/35.0.0/zipalign"
+
+          "$AAPT" dump badging "$APK" | tee work/apk-badging.txt
+          grep -q "package: name='com.harekuto.labstillalive'" work/apk-badging.txt
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee work/apk-signature.txt
+          "$ZIPALIGN" -c -p 4 "$APK" | tee work/apk-zipalign.txt
+          unzip -t "$APK" | tee work/apk-zip-test.txt
+          unzip -l "$APK" | tee work/apk-list.txt
+          grep -q 'assets/lab_payload.zip' work/apk-list.txt
+          grep -q 'assets/inputcontrols/profiles/controls-lab.icp' work/apk-list.txt
+
+          unzip -p "$APK" assets/lab_payload.zip > work/payload-from-apk.zip
+          cmp work/lab_payload.zip work/payload-from-apk.zip
+          unzip -l work/payload-from-apk.zip | tee work/payload-from-apk-list.txt
+          grep -Fq 'LAB-Still Alive- Ver.1.25.exe' work/payload-from-apk-list.txt
+          grep -Fq 'LAB-Still Alive- Ver.1.25.actbin' work/payload-from-apk-list.txt
+          grep -Fq 'LAB-Still Alive- Ver.1.25.actstr' work/payload-from-apk-list.txt
+
+          mkdir -p dist
+          FINAL='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          cp "$APK" "$FINAL"
+          sha256sum "$FINAL" | tee work/apk-sha256.txt
+          stat -c 'APK_SIZE=%s' "$FINAL" | tee work/apk-size.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist/LAB-Still-Alive-v1.25-Android-FULL.apk
+          compression-level: 0
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL-QA
+          path: |
+            work/apk-badging.txt
+            work/apk-signature.txt
+            work/apk-zipalign.txt
+            work/apk-zip-test.txt
+            work/apk-list.txt
+            work/payload-list.txt
+            work/payload-sha256.txt
+            work/payload-from-apk-list.txt
+            work/apk-sha256.txt
+            work/apk-size.txt
+          retention-days: 30
