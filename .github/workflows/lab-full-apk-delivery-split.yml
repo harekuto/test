@@ -1,0 +1,76 @@
+name: Split LAB Full APK for Delivery
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-full-apk-delivery-split.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified full APK from successful build
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: incoming
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35778236579
+
+      - name: Verify and split without recompression
+        run: |
+          set -euxo pipefail
+          APK="$(find incoming -type f -name 'LAB-Still-Alive-v1.25-Android-FULL.apk' -print -quit)"
+          test -n "$APK"
+          test "$(stat -c%s "$APK")" -eq 272633162
+          echo '059b71ab3fdb0af240bbdc5485af1828ee17bc3f7f06bf6aba225ca83a510959  '"$APK" | sha256sum -c -
+          mkdir -p parts
+          split -b 64M -d -a 2 "$APK" parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part
+          test "$(find parts -type f | wc -l)" -eq 5
+          sha256sum parts/* | tee parts/SHA256SUMS.txt
+          ls -lh parts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-part00
+          path: parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part00
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-part01
+          path: parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part01
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-part02
+          path: parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part02
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-part03
+          path: parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part03
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-part04
+          path: parts/LAB-Still-Alive-v1.25-Android-FULL.apk.part04
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-FULL-APK-split-checksums
+          path: parts/SHA256SUMS.txt
+          retention-days: 30
