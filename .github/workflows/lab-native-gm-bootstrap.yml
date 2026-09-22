@@ -166,9 +166,8 @@ jobs:
           disable-linux-hw-accel: false
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: |
-            APK="$(find apk -type f -name '*.apk' -print -quit)"
-            test -n "$APK"
-            adb install -r "$APK"
+            test -n "$(find apk -type f -name '*.apk' -print -quit)"
+            adb install -r "$(find apk -type f -name '*.apk' -print -quit)"
             adb logcat -c
             adb shell am start -W -n "$TEST_PACKAGE/.RunnerActivity"
             sleep 12
