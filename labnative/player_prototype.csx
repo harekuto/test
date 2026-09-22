@@ -107,7 +107,7 @@ if (keyboard_check(vk_right)) mv += 1;
 
 if (mv != last_mv)
 {
-    show_debug_message("LAB_INPUT_MV=" + string(mv) + " PX=" + string(px));
+    show_debug_message(""LAB_INPUT_MV="" + string(mv) + "" PX="" + string(px));
     last_mv = mv;
 }
 
@@ -133,7 +133,7 @@ if (keyboard_check_pressed(ord(""X"")) && py >= 350)
 {
     vy = -7.2;
     jump_count += 1;
-    show_debug_message("LAB_JUMP_TRIGGERED=" + string(jump_count) + " PY=" + string(py));
+    show_debug_message(""LAB_JUMP_TRIGGERED="" + string(jump_count) + "" PY="" + string(py));
 }
 
 vy += 0.36;
