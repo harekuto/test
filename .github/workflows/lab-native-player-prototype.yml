@@ -130,7 +130,12 @@ jobs:
             player-pid.txt
             player-pid-after.txt
             player-start.png
+            player-after-right.png
+            player-after-jump.png
             player-after-input.png
             player-log.txt
+            player-final-log.txt
+            player-screen-hashes.txt
+            touch-map.txt
           if-no-files-found: ignore
           retention-days: 30
