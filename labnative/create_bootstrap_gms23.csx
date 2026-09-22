@@ -84,20 +84,6 @@ var obj = new UndertaleGameObject()
 };
 Data.GameObjects.Add(obj);
 
-var inst = new UndertaleRoom.GameObject()
-{
-    X = 0,
-    Y = 0,
-    InstanceID = Data.GeneralInfo.LastObj++,
-    ObjectDefinition = obj,
-    ScaleX = 1f,
-    ScaleY = 1f,
-    ImageSpeed = 1f,
-    ImageIndex = 0,
-    Color = 0xFFFFFFFF
-};
-room.GameObjects.Add(inst);
-
 var instanceLayer = new UndertaleRoom.Layer()
 {
     ParentRoom = room,
@@ -112,13 +98,21 @@ var instanceLayer = new UndertaleRoom.Layer()
     IsVisible = true,
     Data = new UndertaleRoom.Layer.LayerInstancesData()
 };
-instanceLayer.InstancesData.Instances.Add(inst);
+// Keep the serialized instance layer empty. The bootstrap instance is created
+// from room creation code after CLayerManager has initialized its runtime pools.
 room.Layers.Add(instanceLayer);
+
+var roomCreate = UndertaleCode.CreateEmptyEntry(Data, "gml_RoomCC_room_bootstrap_0_Create");
+room.CreationCodeId = roomCreate;
 
 var imports = new CodeImportGroup(Data)
 {
     MainThreadAction = MainThreadAction
 };
+
+imports.QueueReplace(roomCreate, @"
+instance_create_layer(0, 0, ""Instances"", obj_lab_bootstrap);
+");
 
 imports.QueueReplace(obj.EventHandlerFor(EventType.Create, Data), @"
 display_set_gui_size(640, 480);
@@ -153,4 +147,4 @@ draw_rectangle(32, 380, 32 + ((counter mod 300) * 1.8), 398, false);
 
 imports.Import();
 
-ScriptMessage($"GMS23_BOOTSTRAP_READY version={Data.GeneralInfo.Major}.{Data.GeneralInfo.Minor}.{Data.GeneralInfo.Release}.{Data.GeneralInfo.Build} bc={Data.GeneralInfo.BytecodeVersion} rooms={Data.Rooms.Count} objects={Data.GameObjects.Count} layers={room.Layers.Count}");
+ScriptMessage($"GMS23_BOOTSTRAP_READY version={Data.GeneralInfo.Major}.{Data.GeneralInfo.Minor}.{Data.GeneralInfo.Release}.{Data.GeneralInfo.Build} bc={Data.GeneralInfo.BytecodeVersion} rooms={Data.Rooms.Count} objects={Data.GameObjects.Count} layers={room.Layers.Count} roomInstances={room.GameObjects.Count}");
