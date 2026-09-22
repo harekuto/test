@@ -87,7 +87,18 @@ jobs:
           mkdir -p winlator/app/src/main/assets
           cp work/lab_payload.zip winlator/app/src/main/assets/lab_payload.zip
           cp work/payload-sha256.txt winlator/app/src/main/assets/lab_payload_sha256.txt
+          python - <<'PY'
+          from pathlib import Path
+          p=Path("winlator/app/build.gradle")
+          s=p.read_text()
+          anchor="    compileSdk 35\n"
+          if anchor not in s:
+              raise SystemExit("android build.gradle anchor missing")
+          s=s.replace(anchor, anchor+"\n    androidResources {\n        noCompress += ['zip']\n    }\n", 1)
+          p.write_text(s)
+          PY
           grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
+          grep -n "noCompress" winlator/app/build.gradle
           grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
 
       - name: Install Android build dependencies
@@ -101,6 +112,7 @@ jobs:
         run: |
           set -euxo pipefail
           chmod +x gradlew
+          printf '\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8\norg.gradle.workers.max=2\n' >> gradle.properties
           ./gradlew --no-daemon clean :app:assembleDebug
 
       - name: Deep verify APK, embedded payload and signature
