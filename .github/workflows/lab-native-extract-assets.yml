@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/lab-native-extract-assets.yml'
+      - 'labnative/extract_scene_ir.py'
 
 permissions:
   contents: write
@@ -54,6 +55,27 @@ jobs:
           echo "WAV_COUNT=$(find work/assets -type f -iname '*.wav' | wc -l)" | tee -a work/counts.txt
           echo "TOTAL_FILES=$(find work/assets -type f | wc -l)" | tee -a work/counts.txt
           sha256sum $(find work/assets -type f -iname '*.png' | sort | head -20) > work/first-png-sha256.txt || true
+      - name: Decode ACTKOOL scene, gadget and collision IR
+        run: |
+          set -eux
+          ACTBIN="$(find work/game -type f -name 'LAB-Still Alive- Ver.1.25.actbin' -print -quit)"
+          test -n "$ACTBIN"
+          mkdir -p work/scene
+          python3 labnative/extract_scene_ir.py "$ACTBIN" work/scene --preview-canvas 3 | tee work/scene-summary.txt
+          test -s work/scene/scene-ir.json
+          test -s work/scene/canvas_003.png
+          test "$(stat -c%s work/scene/canvas_003_collision.bin)" -eq 16800
+          python3 - <<'PY'
+          import json
+          d=json.load(open("work/scene/scene-ir.json",encoding="utf-8"))
+          assert d["canvas_count"] == 109, d["canvas_count"]
+          assert d["gadget_placement_count"] == 838, d["gadget_placement_count"]
+          c=d["canvases"][3]
+          assert (c["screens_x"],c["screens_y"]) == (7,2)
+          assert (c["pixel_w"],c["pixel_h"]) == (4480,960)
+          print("SCENE_IR_VALID")
+          PY
+
       - name: Create texture contact sheet metadata
         run: |
           python3 - <<'PY'
@@ -75,19 +97,21 @@ jobs:
         run: |
           set -eux
           cd work
-          7z a -tzip -mx=1 LAB-ACTKOOL-Native-Assets-v1.zip assets/ original-sha256.txt game-files.txt asset-files.txt counts.txt texture-metadata.json extractor.log
-          sha256sum LAB-ACTKOOL-Native-Assets-v1.zip | tee asset-pack-sha256.txt
+          7z a -tzip -mx=1 LAB-ACTKOOL-Native-Assets-v2.zip assets/ scene/ scene-summary.txt original-sha256.txt game-files.txt asset-files.txt counts.txt texture-metadata.json extractor.log
+          sha256sum LAB-ACTKOOL-Native-Assets-v2.zip | tee asset-pack-sha256.txt
 
       - uses: actions/upload-artifact@v4
         with:
           name: LAB-ACTKOOL-Native-Assets
           path: |
-            work/LAB-ACTKOOL-Native-Assets-v1.zip
+            work/LAB-ACTKOOL-Native-Assets-v2.zip
             work/original-sha256.txt
             work/game-files.txt
             work/asset-files.txt
             work/counts.txt
             work/texture-metadata.json
+            work/scene/
+            work/scene-summary.txt
             work/extractor.log
             work/asset-pack-sha256.txt
           compression-level: 0
@@ -96,10 +120,12 @@ jobs:
       - name: Publish stable native asset pack
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: lab-actkool-native-assets-v1
-          name: LAB Still Alive ACTKOOL Native Assets v1
+          tag_name: lab-actkool-native-assets-v2
+          name: LAB Still Alive ACTKOOL Native Assets v2
           body: |
             Extracted native asset pack from the original LAB Still Alive v1.25 ACTKOOL archive.
+            Includes 109 decoded canvas maps, 838 gadget placements, compressed tile grids,
+            first real map preview and original ACTKOOL collision mask.
             Used by the native GameMaker Android reconstruction pipeline.
-          files: work/LAB-ACTKOOL-Native-Assets-v1.zip
+          files: work/LAB-ACTKOOL-Native-Assets-v2.zip
           overwrite_files: true
