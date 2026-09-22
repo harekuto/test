@@ -2,11 +2,6 @@ name: LAB Native Player Touch QA
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/lab-native-player-touch-qa.yml'
-      - 'labnative/player_smoke.sh'
 
 permissions:
   actions: read
