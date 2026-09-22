@@ -7,92 +7,159 @@ on:
     paths:
       - '.github/workflows/lab-native-player-prototype.yml'
       - 'labnative/player_prototype.csx'
-      - 'labnative/extract_player_assets.py'
       - 'labnative/player_smoke.sh'
+      - 'labstillalive/native/patch_apk.py'
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
+
+concurrency:
+  group: lab-native-player-prototype
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare source, tools and donor
-        run: |
-          set -eux
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq unzip zip openjdk-17-jdk
-          mkdir -p work/assets work/utmt work/pkg
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-          curl -L --fail --retry 3 \
-            'https://sdmntprnortheu.oaiusercontent.com/files/00000000-e150-81f4-8648-58c057113a57/raw?se=2026-09-22T11%3A48%3A41Z&sp=r&sv=2026-02-06&sr=b&scid=ec72baa9-d8da-5cd6-9107-59f94a893754&skoid=5bfb38a5-43fb-4c63-80a1-6ae1e97e2e16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-22T10%3A49%3A38Z&ske=2026-09-23T10%3A49%3A38Z&sks=b&skv=2026-02-06&sig=xxCxS0e6g6memtVdjT26GJrktbHEm/2SeRKWZjc41zk%3D' \
-            -o work/assets/wall_008.png
-          curl -L --fail --retry 3 \
-            'https://sdmntprnortheu.oaiusercontent.com/files/00000000-4150-81f4-b214-cce9b70c856e/raw?se=2026-09-22T11%3A48%3A43Z&sp=r&sv=2026-02-06&sr=b&scid=c256cd0f-e372-5cd7-9d86-9d8562b6c548&skoid=5bfb38a5-43fb-4c63-80a1-6ae1e97e2e16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-22T06%3A38%3A58Z&ske=2026-09-23T06%3A38%3A58Z&sks=b&skv=2026-02-06&sig=Y9RPSeTyH2EfpLmAMIkkR8LWyctoa89lmRLo3Nl2VPU%3D' \
-            -o work/assets/wall_009.png
+      - name: Prepare verified native assets, tools and GameMaker donor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip zip p7zip-full
+          mkdir -p work/assets work/utmt work/pkg dist
+
+          curl -L --fail --retry 3             'https://github.com/harekuto/test/releases/download/lab-native-player-assets-v1/wall_008_native.png'             -o work/assets/wall_008.png
+          curl -L --fail --retry 3             'https://github.com/harekuto/test/releases/download/lab-native-player-assets-v1/wall_009_native.png'             -o work/assets/wall_009.png
           test "$(stat -c%s work/assets/wall_008.png)" -eq 18106
           test "$(stat -c%s work/assets/wall_009.png)" -eq 15036
+          echo '9164cdc223ac0211f774269585fbef21d717590bce889590b005096b82b93d46  work/assets/wall_008.png' | sha256sum -c -
+          echo '0537a4a99956c39a8c741439765cafa4a70029ab88f69eb4f4ca7b686d6b13db  work/assets/wall_009.png' | sha256sum -c -
           sha256sum work/assets/wall_008.png work/assets/wall_009.png | tee work/player-assets-sha256.txt
 
           curl -L --fail --retry 3             'https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.2.0/UTMT_CLI_v0.9.2.0-Ubuntu.zip'             -o work/utmt.zip
           unzip -q work/utmt.zip -d work/utmt
           UTMT="$(find work/utmt -type f \( -name 'UndertaleModCli' -o -name 'UndertaleModCLI' \) -print -quit)"
+          test -n "$UTMT"
           chmod +x "$UTMT"
           echo "UTMT=$UTMT" >> "$GITHUB_ENV"
+
+          git clone https://github.com/znm2500/GameMaker-Mobiler.git work/mobiler
+          (
+            cd work/mobiler
+            git checkout 6a23adc1d4e71c238456568df18f85cc7b44caa9
+          )
 
           curl -L --fail --retry 3             'https://github.com/harekuto/test/releases/download/happy-heart-panic-android-v5/Happy-Heart-Panic-2025-Android-v5.apk'             -o work/donor.apk
           unzip -p work/donor.apk assets/game.droid > work/donor.droid
           test -s work/donor.droid
 
-      - name: Build native player data
+      - name: Build native LAB player GameMaker data
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
           "$UTMT" load work/donor.droid -s labnative/player_prototype.csx -o work/game.droid -f -v | tee work/import.txt
           "$UTMT" info work/game.droid -v | tee work/game-info.txt
           rm -rf work/dump
           "$UTMT" dump work/game.droid -c UMT_DUMP_ALL -o work/dump >/dev/null
           grep -R -n 'LAB_NATIVE_PLAYER_OK' work/dump | tee work/proof.txt
+          grep -R -n 'LAB_JUMP_TRIGGERED' work/dump | tee work/input-proof.txt
           test -s work/proof.txt
+          test -s work/input-proof.txt
 
-      - name: Package native playable APK
+      - name: Repackage with LAB Android identity
+        shell: bash
+        env:
+          LAB_PACKAGE: com.harekuto.labstillalive
+          LAB_VERSION: 1.25-native-player2
+          LAB_VCODE: '1200'
         run: |
-          set -eux
-          cp work/donor.apk work/pkg/u.apk
-          zip -q -d work/pkg/u.apk 'META-INF/*' || true
-          mkdir -p work/pkg/assets
-          cp work/game.droid work/pkg/assets/game.droid
-          cp work/assets/wall_008.png work/pkg/assets/wall_008.png
-          cp work/assets/wall_009.png work/pkg/assets/wall_009.png
-          (
-            cd work/pkg
-            zip -q -0 -u u.apk assets/game.droid assets/wall_008.png assets/wall_009.png
-          )
+          set -euxo pipefail
+          APKTOOL="$(find work/mobiler -type f -name 'apktool_3.0.3.jar' -print -quit)"
+          test -n "$APKTOOL"
+          java -jar "$APKTOOL" d -f -o work/apkdecoded work/donor.apk
+          python labstillalive/native/patch_apk.py work/apkdecoded
 
+          mkdir -p work/apkdecoded/assets
+          rm -f work/apkdecoded/assets/game.droid
+          rm -f work/apkdecoded/assets/supporters.txt work/apkdecoded/assets/credits.txt work/apkdecoded/assets/CONTROLS.txt
+          rm -rf work/apkdecoded/assets/dlc
+          cp work/game.droid work/apkdecoded/assets/game.droid
+          cp work/assets/wall_008.png work/apkdecoded/assets/wall_008.png
+          cp work/assets/wall_009.png work/apkdecoded/assets/wall_009.png
+
+          java -Xmx4g -jar "$APKTOOL" b -f --no-crunch -o work/unsigned.apk work/apkdecoded
+          test -s work/unsigned.apk
+
+      - name: Align, sign and deep-verify native prototype APK
+        shell: bash
+        run: |
+          set -euxo pipefail
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          "$BUILD_TOOLS/zipalign" -f -p 4 work/pkg/u.apk work/pkg/a.apk
-          keytool -genkeypair -v             -keystore work/pkg/debug.keystore             -storepass android -alias androiddebugkey -keypass android             -dname 'CN=LAB Native Player,O=Harekuto,C=KZ'             -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
-          "$BUILD_TOOLS/apksigner" sign             --ks work/pkg/debug.keystore --ks-key-alias androiddebugkey             --ks-pass pass:android --key-pass pass:android             --out work/LAB-Native-Player-Prototype.apk work/pkg/a.apk
-          "$BUILD_TOOLS/apksigner" verify --verbose work/LAB-Native-Player-Prototype.apk
-          "$BUILD_TOOLS/aapt" dump badging work/LAB-Native-Player-Prototype.apk > work/badging.txt
-          PKG="$(sed -n "s/package: name='\([^']*\)'.*/\1/p" work/badging.txt | head -1)"
-          test -n "$PKG"
-          echo "$PKG" > work/package.txt
-          sha256sum work/LAB-Native-Player-Prototype.apk | tee work/apk-sha256.txt
+          ZIPALIGN="$BUILD_TOOLS/zipalign"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          AAPT="$BUILD_TOOLS/aapt"
+
+          "$ZIPALIGN" -f -p 4 work/unsigned.apk work/aligned.apk
+          keytool -genkeypair -v             -keystore work/lab-native.keystore             -storepass android -alias labnative -keypass android             -dname 'CN=LAB Still Alive Native,O=Harekuto,C=KZ'             -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
+
+          FINAL="dist/LAB-Still-Alive-v1.25-NATIVE-Player-v2.apk"
+          "$APKSIGNER" sign             --ks work/lab-native.keystore             --ks-key-alias labnative             --ks-pass pass:android --key-pass pass:android             --out "$FINAL" work/aligned.apk
+
+          "$APKSIGNER" verify --verbose --print-certs "$FINAL" | tee work/signature.txt
+          "$ZIPALIGN" -c -p 4 "$FINAL" | tee work/zipalign.txt
+          "$AAPT" dump badging "$FINAL" | tee work/badging.txt
+          7z t "$FINAL" | tee work/zip-test.txt
+
+          grep -q "package: name='com.harekuto.labstillalive'" work/badging.txt
+          grep -q "versionCode='1200'" work/badging.txt
+          grep -q "versionName='1.25-native-player2'" work/badging.txt
+          unzip -l "$FINAL" | tee work/apk-list.txt
+          grep -q 'assets/game.droid' work/apk-list.txt
+          grep -q 'assets/wall_008.png' work/apk-list.txt
+          grep -q 'assets/wall_009.png' work/apk-list.txt
+          grep -q 'lib/arm64-v8a/libyoyo.so' work/apk-list.txt
+          grep -q 'lib/x86_64/libyoyo.so' work/apk-list.txt
+
+          printf 'com.harekuto.labstillalive\n' > work/package.txt
+          sha256sum "$FINAL" | tee work/apk-sha256.txt
+          stat -c 'APK_SIZE=%s' "$FINAL" | tee work/apk-size.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LAB-Native-Player-Prototype
+          name: LAB-Still-Alive-Native-Player-v2
+          path: dist/LAB-Still-Alive-v1.25-NATIVE-Player-v2.apk
+          compression-level: 0
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Player-v2-Static-QA
           path: |
-            work/LAB-Native-Player-Prototype.apk
             work/package.txt
             work/game-info.txt
             work/proof.txt
+            work/input-proof.txt
             work/player-assets-sha256.txt
+            work/signature.txt
+            work/zipalign.txt
+            work/badging.txt
+            work/zip-test.txt
+            work/apk-list.txt
             work/apk-sha256.txt
-          if-no-files-found: ignore
-          retention-days: 14
+            work/apk-size.txt
+          retention-days: 30
 
   smoke:
     needs: build
@@ -102,15 +169,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: LAB-Native-Player-Prototype
+          name: LAB-Still-Alive-Native-Player-v2
           path: artifact
+      - run: echo 'com.harekuto.labstillalive' > artifact/package.txt
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
           if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
-      - name: Android player smoke
+
+      - name: Android native movement + jump touch QA
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -122,10 +192,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           script: bash labnative/player_smoke.sh
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LAB-Native-Player-Prototype-Smoke
+          name: LAB-Still-Alive-Native-Player-v2-Runtime-QA
           path: |
             player-pid.txt
             player-pid-after.txt
@@ -139,3 +210,26 @@ jobs:
             touch-map.txt
           if-no-files-found: ignore
           retention-days: 30
+
+  publish:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Player-v2
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-native-player-v2
+          name: LAB Still Alive v1.25 Native Player Prototype v2
+          body: |
+            Native GameMaker Android reconstruction prototype for LAB Still Alive.
+            No Wine and no Winlator.
+
+            This is not yet the complete game. It contains the original ACTKOOL Misa player atlas,
+            native idle/run animation reconstruction, gravity/jump prototype, and mapped Android
+            left/right/jump touch controls. Published only after Android emulator runtime and
+            real touch-input QA pass.
+          files: dist/LAB-Still-Alive-v1.25-NATIVE-Player-v2.apk
+          overwrite_files: true
