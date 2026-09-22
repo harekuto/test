@@ -1,0 +1,53 @@
+name: Publish LAB Native Player Assets
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-publish-assets.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Native-Player-Prototype
+          path: artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: harekuto/test
+          run-id: 35723114043
+
+      - name: Extract verified original ACTKOOL player atlases
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK="$(find artifact -type f -name '*.apk' -print -quit)"
+          test -s "$APK"
+          mkdir -p dist
+          unzip -p "$APK" assets/wall_008.png > dist/wall_008_native.png
+          unzip -p "$APK" assets/wall_009.png > dist/wall_009_native.png
+          test "$(stat -c%s dist/wall_008_native.png)" -eq 18106
+          test "$(stat -c%s dist/wall_009_native.png)" -eq 15036
+          sha256sum dist/wall_008_native.png dist/wall_009_native.png | tee dist/SHA256SUMS.txt
+          file dist/wall_008_native.png dist/wall_009_native.png
+
+      - name: Publish permanent native asset release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-native-player-assets-v1
+          name: LAB Still Alive Native Player Assets v1
+          body: |
+            Original LAB Still Alive ACTKOOL player atlases extracted from the verified native prototype build.
+            These are build inputs for the native GameMaker reimplementation pipeline.
+          files: |
+            dist/wall_008_native.png
+            dist/wall_009_native.png
+            dist/SHA256SUMS.txt
+          overwrite_files: true
