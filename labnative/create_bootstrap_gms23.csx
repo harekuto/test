@@ -111,7 +111,7 @@ var imports = new CodeImportGroup(Data)
 };
 
 imports.QueueReplace(roomCreate, @"
-instance_create_layer(0, 0, ""Instances"", obj_lab_bootstrap);
+instance_create_depth(0, 0, 0, obj_lab_bootstrap);
 ");
 
 imports.QueueReplace(obj.EventHandlerFor(EventType.Create, Data), @"
