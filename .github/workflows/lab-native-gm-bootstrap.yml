@@ -1,0 +1,218 @@
+name: LAB Native GameMaker Bootstrap
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: lab-native-gm-bootstrap
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-gm-bootstrap.yml'
+      - 'labstillalive/native/bootstrap.csx'
+      - 'labstillalive/native/patch_apk.py'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare UndertaleModTool and GameMaker runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force work, dist | Out-Null
+          git clone https://github.com/znm2500/GameMaker-Mobiler.git work/mobiler
+          Push-Location work/mobiler
+          git checkout 6a23adc1d4e71c238456568df18f85cc7b44caa9
+          Pop-Location
+          Invoke-WebRequest -Uri 'https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.2.0/UTMT_CLI_v0.9.2.0-Windows.zip' -OutFile work/utmt.zip
+          Expand-Archive work/utmt.zip -DestinationPath work/utmt -Force
+          $cli=Get-ChildItem work/utmt -Recurse -Filter UndertaleModCli.exe | Select-Object -First 1
+          if(!$cli){ throw 'UTMT CLI missing' }
+          "UTMT_CLI=$($cli.FullName)" | Out-File -Append $env:GITHUB_ENV
+          $template=Join-Path $PWD 'work/mobiler/GMS2 APK/2023.11.apk'
+          if(!(Test-Path $template)){ throw 'runner missing' }
+          "TEMPLATE_APK=$template" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Create native game.droid from scratch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & $env:UTMT_CLI new -o work/blank.droid -f -v
+          if($LASTEXITCODE -ne 0){ throw 'UTMT new failed' }
+          & $env:UTMT_CLI load work/blank.droid -s labstillalive/native/bootstrap.csx -o work/game.droid -f -v 2>&1 | Tee-Object work/bootstrap-build.txt
+          if($LASTEXITCODE -ne 0){ throw 'bootstrap GML import failed' }
+          & $env:UTMT_CLI info work/game.droid -v 2>&1 | Tee-Object work/game-info.txt
+          if($LASTEXITCODE -ne 0){ throw 'generated game.droid invalid' }
+          if((Get-Item work/game.droid).Length -lt 1024){ throw 'generated game.droid suspiciously small' }
+
+      - name: Package native Android APK
+        shell: pwsh
+        env:
+          LAB_PACKAGE: com.harekuto.labstillalive
+          LAB_VERSION: 1.25-native-bootstrap1
+          LAB_VCODE: '1001'
+        run: |
+          $ErrorActionPreference='Stop'
+          $apktool=Get-ChildItem work/mobiler -Recurse -Filter 'apktool_3.0.3.jar' | Select-Object -First 1
+          if(!$apktool){ throw 'apktool missing' }
+          java -jar $apktool.FullName d -f -o work/apkdecoded $env:TEMPLATE_APK
+          if($LASTEXITCODE -ne 0){ throw 'apktool decode failed' }
+          python labstillalive/native/patch_apk.py work/apkdecoded
+          New-Item -ItemType Directory -Force work/apkdecoded/assets | Out-Null
+          Remove-Item work/apkdecoded/assets/game.droid -Force -ErrorAction SilentlyContinue
+          Copy-Item work/game.droid work/apkdecoded/assets/game.droid -Force
+          java -Xmx4g -jar $apktool.FullName b -f --no-crunch -o work/unsigned.apk work/apkdecoded
+          if($LASTEXITCODE -ne 0){ throw 'apktool build failed' }
+
+      - name: Align, sign and verify
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $bt=Get-ChildItem "$env:ANDROID_HOME/build-tools" -Directory | Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+          $zipalign=Join-Path $bt.FullName 'zipalign.exe'
+          $apksigner=Join-Path $bt.FullName 'apksigner.bat'
+          $aapt=Join-Path $bt.FullName 'aapt.exe'
+          $pass=[guid]::NewGuid().ToString('N')
+          keytool -genkeypair -keystore work/labnative.keystore -storepass $pass -keypass $pass -alias labnative -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=LAB Still Alive Native,O=Harekuto,C=KZ'
+          & $zipalign -f -p 4 work/unsigned.apk work/aligned.apk
+          if($LASTEXITCODE -ne 0){ throw 'zipalign failed' }
+          $final=Join-Path $PWD 'dist/LAB-Still-Alive-v1.25-NATIVE-bootstrap.apk'
+          & $apksigner sign --ks work/labnative.keystore --ks-key-alias labnative --ks-pass "pass:$pass" --key-pass "pass:$pass" --out $final work/aligned.apk
+          if($LASTEXITCODE -ne 0){ throw 'sign failed' }
+          & $apksigner verify --verbose --print-certs $final | Tee-Object work/signature.txt
+          if($LASTEXITCODE -ne 0){ throw 'signature verify failed' }
+          & $aapt dump badging $final | Tee-Object work/badging.txt
+          & $zipalign -c -v 4 $final | Tee-Object work/zipalign.txt
+          if($LASTEXITCODE -ne 0){ throw 'zipalign verify failed' }
+          7z t $final | Tee-Object work/zip-test.txt
+          if($LASTEXITCODE -ne 0){ throw 'APK ZIP failed' }
+          7z l $final | Tee-Object work/apk-list.txt
+          $list=Get-Content work/apk-list.txt -Raw
+          if($list -notmatch 'assets\\game\.droid'){ throw 'game.droid missing' }
+          if($list -notmatch 'lib\\arm64-v8a\\libyoyo\.so'){ throw 'arm64 runner missing' }
+          if($list -notmatch 'lib\\x86_64\\libyoyo\.so'){ throw 'x86_64 runner missing' }
+          $hash=(Get-FileHash $final -Algorithm SHA256).Hash.ToLower()
+          $size=(Get-Item $final).Length
+          "APK_SIZE=$size" | Tee-Object work/final-hash.txt
+          "APK_SHA256=$hash" | Tee-Object -Append work/final-hash.txt
+          "NATIVE_BOOTSTRAP=TRUE" | Tee-Object -Append work/final-hash.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Bootstrap-APK
+          path: dist/LAB-Still-Alive-v1.25-NATIVE-bootstrap.apk
+          compression-level: 0
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Bootstrap-QA
+          path: |
+            work/bootstrap-build.txt
+            work/game-info.txt
+            work/signature.txt
+            work/badging.txt
+            work/zipalign.txt
+            work/zip-test.txt
+            work/apk-list.txt
+            work/final-hash.txt
+          retention-days: 30
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Bootstrap-APK
+          path: apk
+
+      - name: Android native bootstrap smoke
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_PACKAGE: com.harekuto.labstillalive
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7_pro
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: |
+            APK="$(find apk -type f -name '*.apk' -print -quit)"
+            test -n "$APK"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell am start -W -n "$TEST_PACKAGE/.RunnerActivity"
+            sleep 12
+            adb shell pidof "$TEST_PACKAGE" | tee pid.txt
+            test -s pid.txt
+            adb exec-out screencap -p > bootstrap.png
+            adb shell input tap 1000 500
+            sleep 3
+            adb exec-out screencap -p > bootstrap-touch.png
+            adb logcat -d -v threadtime > bootstrap-log.txt
+            if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed|ERROR in[[:space:]]+action number' bootstrap-log.txt; then
+              cat bootstrap-log.txt
+              exit 1
+            fi
+            echo LAB_NATIVE_BOOTSTRAP_RUNTIME_OK
+
+      - name: Upload runtime QA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Bootstrap-Runtime-QA
+          path: |
+            pid.txt
+            bootstrap.png
+            bootstrap-touch.png
+            bootstrap-log.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  publish:
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-Native-Bootstrap-APK
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-native-bootstrap
+          name: LAB Still Alive v1.25 Native GameMaker Bootstrap
+          body: |
+            Native GameMaker Android bootstrap for the ACTKOOL reimplementation path.
+            Generated from scratch with UndertaleModTool and packaged in an Android GameMaker runner.
+            No Wine and no Winlator.
+          files: dist/LAB-Still-Alive-v1.25-NATIVE-bootstrap.apk
+          overwrite_files: true
