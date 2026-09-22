@@ -1,0 +1,27 @@
+name: Check GameMaker CI Readiness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/check-gamemaker-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check access key presence
+        shell: bash
+        env:
+          GM_ACCESS_KEY: ${{ secrets.GAMEMAKER_ACCESS_KEY }}
+          GM_ACCESS_KEY_ALT: ${{ secrets.GAME_MAKER_ACCESS_KEY }}
+        run: |
+          if [ -n "$GM_ACCESS_KEY" ] || [ -n "$GM_ACCESS_KEY_ALT" ]; then
+            echo "GAMEMAKER_ACCESS_KEY_STATUS=present"
+          else
+            echo "GAMEMAKER_ACCESS_KEY_STATUS=missing"
+          fi
