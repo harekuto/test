@@ -84,6 +84,8 @@ facing = 1;
 anim_index = 0;
 anim_timer = 0;
 state_run = false;
+last_mv = 0;
+jump_count = 0;
 
 idle_x = [1,2,3,0,0,1,2];
 idle_y = [0,0,0,0,1,1,1];
@@ -102,6 +104,12 @@ imports.QueueReplace(obj.EventHandlerFor(EventType.Step, EventSubtypeStep.Step, 
 var mv = 0;
 if (keyboard_check(vk_left)) mv -= 1;
 if (keyboard_check(vk_right)) mv += 1;
+
+if (mv != last_mv)
+{
+    show_debug_message("LAB_INPUT_MV=" + string(mv) + " PX=" + string(px));
+    last_mv = mv;
+}
 
 if (mv != 0)
 {
@@ -122,7 +130,11 @@ else if (state_run)
 }
 
 if (keyboard_check_pressed(ord(""X"")) && py >= 350)
+{
     vy = -7.2;
+    jump_count += 1;
+    show_debug_message("LAB_JUMP_TRIGGERED=" + string(jump_count) + " PY=" + string(py));
+}
 
 vy += 0.36;
 py += vy;
@@ -173,6 +185,8 @@ draw_text(563,374,""X"");
 
 draw_set_color(c_lime);
 draw_text(18, 70, ""LAB_NATIVE_PLAYER_OK"");
+draw_set_color(c_white);
+draw_text(18, 94, ""PX="" + string(px) + "" PY="" + string(py) + "" JUMPS="" + string(jump_count));
 ");
 
 imports.Import();
