@@ -22,7 +22,7 @@ jobs:
       - name: Install extraction tools
         run: |
           set -eux
-          python3 -m pip install --upgrade gdown
+          python3 -m pip install --upgrade gdown pillow
           sudo apt-get update -qq
           sudo apt-get install -y -qq p7zip-full file
       - name: Download original LAB archive
