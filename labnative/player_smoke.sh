@@ -33,6 +33,13 @@ points={
     "LEFT":(67,393),
     "RIGHT":(163,393),
     "JUMP":(573,383),
+    "MELEE":(470,380),
+    "GUN":(570,285),
+    "RELOAD":(470,285),
+    "GUARD":(372,380),
+    "BACK":(67,295),
+    "MENU":(274,41),
+    "TAB":(362,41),
 }
 print(f"SCREEN={w}x{h}")
 print(f"SCALE={scale:.6f}")
@@ -48,8 +55,22 @@ coord() {
 
 RIGHT="$(coord RIGHT)"
 JUMP="$(coord JUMP)"
+MELEE="$(coord MELEE)"
+GUN="$(coord GUN)"
+RELOAD="$(coord RELOAD)"
+GUARD="$(coord GUARD)"
+BACK="$(coord BACK)"
+MENU="$(coord MENU)"
+TAB="$(coord TAB)"
 RX="${RIGHT%,*}"; RY="${RIGHT#*,}"
 JX="${JUMP%,*}"; JY="${JUMP#*,}"
+MX="${MELEE%,*}"; MY="${MELEE#*,}"
+GX="${GUN%,*}"; GY="${GUN#*,}"
+WX="${RELOAD%,*}"; WY="${RELOAD#*,}"
+QX="${GUARD%,*}"; QY="${GUARD#*,}"
+BX="${BACK%,*}"; BY="${BACK#*,}"
+UX="${MENU%,*}"; UY="${MENU#*,}"
+TX="${TAB%,*}"; TY="${TAB#*,}"
 
 START_SHA="$(sha256sum player-start.png | awk '{print $1}')"
 
@@ -65,7 +86,16 @@ fi
 adb shell input swipe "$JX" "$JY" "$JX" "$JY" 350
 sleep 0.20
 adb exec-out screencap -p > player-after-jump.png
-sleep 2
+sleep 1
+
+for xy in "$MX,$MY" "$GX,$GY" "$WX,$WY" "$QX,$QY" "$BX,$BY" "$UX,$UY" "$TX,$TY"; do
+  x="${xy%,*}"
+  y="${xy#*,}"
+  adb shell input swipe "$x" "$y" "$x" "$y" 260
+  sleep 0.18
+done
+
+sleep 1
 adb exec-out screencap -p > player-after-input.png
 
 adb shell pidof "$PKG" > player-pid-after.txt 2>/dev/null || true
@@ -87,6 +117,14 @@ grep -F 'LAB_JUMP_TRIGGERED=' player-final-log.txt > /dev/null || {
   grep -E 'LAB_INPUT|LAB_JUMP|yoyo' player-final-log.txt | tail -200 || true
   exit 1
 }
+
+for marker in LAB_ACTION_MELEE=1 LAB_ACTION_GUN=1 LAB_ACTION_RELOAD=1 LAB_ACTION_GUARD=1 LAB_ACTION_BACK=1 LAB_ACTION_MENU=1 LAB_ACTION_TAB=1; do
+  grep -F "$marker" player-final-log.txt > /dev/null || {
+    echo "Native action marker missing: $marker"
+    grep -a -E 'LAB_|yoyo|FATAL|SIG' player-final-log.txt | tail -260 || true
+    exit 1
+  }
+done
 
 echo "START_SHA=$START_SHA" > player-screen-hashes.txt
 echo "RIGHT_SHA=$RIGHT_SHA" >> player-screen-hashes.txt
