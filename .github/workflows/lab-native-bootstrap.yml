@@ -1,0 +1,159 @@
+name: Build LAB Native GameMaker Bootstrap
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-bootstrap.yml'
+      - 'labnative/create_bootstrap.csx'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          set -eux
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq unzip zip openjdk-17-jdk
+          mkdir -p work/utmt work/pkg
+
+      - name: Download UndertaleModTool CLI and GameMaker runner
+        run: |
+          set -eux
+          curl -L --fail --retry 3             'https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.2.0/UTMT_CLI_v0.9.2.0-Ubuntu.zip'             -o work/utmt.zip
+          unzip -q work/utmt.zip -d work/utmt
+          UTMT="$(find work/utmt -type f \( -name 'UndertaleModCli' -o -name 'UndertaleModCLI' \) -print -quit)"
+          test -n "$UTMT"
+          chmod +x "$UTMT"
+          echo "UTMT=$UTMT" >> "$GITHUB_ENV"
+
+          curl -L --fail --retry 3             'https://raw.githubusercontent.com/znm2500/GameMaker-Mobiler/main/GMS2%20APK/2024.14.apk'             -o work/runner.apk
+          test -s work/runner.apk
+
+      - name: Create blank GameMaker data file
+        run: |
+          set -eux
+          "$UTMT" new -o work/blank.win -v
+          "$UTMT" info work/blank.win -v | tee work/blank-info.txt
+
+      - name: Inject native bootstrap GML
+        run: |
+          set -eux
+          "$UTMT" load work/blank.win -s labnative/create_bootstrap.csx -o work/game.droid -f -v | tee work/bootstrap-import.txt
+          "$UTMT" info work/game.droid -v | tee work/game-info.txt
+          "$UTMT" dump work/game.droid -c UMT_DUMP_ALL -o work/dump >/dev/null
+          grep -R -n 'BOOTSTRAP_OK' work/dump | tee work/bootstrap-proof.txt
+          test -s work/bootstrap-proof.txt
+
+      - name: Build signed runner APK
+        shell: bash
+        run: |
+          set -eux
+          cp work/runner.apk work/pkg/native-unsigned.apk
+          zip -q -d work/pkg/native-unsigned.apk 'META-INF/*' || true
+          mkdir -p work/pkg/assets
+          cp work/game.droid work/pkg/assets/game.droid
+          (
+            cd work/pkg
+            zip -q -0 -u native-unsigned.apk assets/game.droid
+          )
+
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          echo "BUILD_TOOLS=$BUILD_TOOLS" >> "$GITHUB_ENV"
+          "$BUILD_TOOLS/zipalign" -f -p 4 work/pkg/native-unsigned.apk work/pkg/native-aligned.apk
+
+          keytool -genkeypair -v             -keystore work/pkg/debug.keystore             -storepass android -alias androiddebugkey -keypass android             -dname 'CN=Android Debug,O=Android,C=US'             -keyalg RSA -keysize 2048 -validity 10000 >/dev/null 2>&1
+
+          "$BUILD_TOOLS/apksigner" sign             --ks work/pkg/debug.keystore             --ks-key-alias androiddebugkey             --ks-pass pass:android             --key-pass pass:android             --out work/LAB-Native-GameMaker-Bootstrap.apk             work/pkg/native-aligned.apk
+
+          "$BUILD_TOOLS/zipalign" -c -p 4 work/LAB-Native-GameMaker-Bootstrap.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs work/LAB-Native-GameMaker-Bootstrap.apk | tee work/signature.txt
+
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          "$AAPT" dump badging work/LAB-Native-GameMaker-Bootstrap.apk | tee work/badging.txt
+          PKG="$(sed -n "s/package: name='\([^']*\)'.*/\1/p" work/badging.txt | head -1)"
+          test -n "$PKG"
+          echo "$PKG" > work/package.txt
+
+          unzip -l work/LAB-Native-GameMaker-Bootstrap.apk | grep 'assets/game.droid'
+          sha256sum work/LAB-Native-GameMaker-Bootstrap.apk | tee work/apk-sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-Native-GameMaker-Bootstrap
+          path: |
+            work/LAB-Native-GameMaker-Bootstrap.apk
+            work/package.txt
+            work/badging.txt
+            work/game-info.txt
+            work/bootstrap-proof.txt
+            work/signature.txt
+            work/apk-sha256.txt
+          retention-days: 30
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Native-GameMaker-Bootstrap
+          path: artifact
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+
+      - name: Android runtime smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: |
+            bash -lc '
+              set -euxo pipefail
+              APK="$(find artifact -name "*.apk" -print -quit)"
+              PKG="$(cat artifact/package.txt)"
+              adb install -r "$APK"
+              adb logcat -c
+              adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
+              sleep 12
+              adb shell pidof "$PKG" | tee smoke-pid.txt
+              test -s smoke-pid.txt
+              adb exec-out screencap -p > bootstrap.png
+              adb logcat -d -v threadtime > smoke-log.txt
+              if grep -E -i "FATAL EXCEPTION|SIGSEGV|SIGABRT|AndroidRuntime.*FATAL|FATAL ERROR in|Memory allocation failed" smoke-log.txt; then
+                cat smoke-log.txt
+                exit 1
+              fi
+              echo LAB_NATIVE_BOOTSTRAP_SMOKE_OK
+            '
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LAB-Native-GameMaker-Bootstrap-Smoke
+          path: |
+            bootstrap.png
+            smoke-pid.txt
+            smoke-log.txt
+          if-no-files-found: ignore
+          retention-days: 30
