@@ -1,0 +1,35 @@
+name: Publish LAB Scene IR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-publish-scene-ir.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download verified scene IR bundle
+        run: |
+          set -eux
+          curl -L --fail --retry 3 'https://sdmntprcentralus.oaiusercontent.com/files/00000000-f9c4-81f5-adb7-cbab37c87ab0/raw?se=2026-09-22T19%3A00%3A30Z&sp=r&sv=2026-02-06&sr=b&scid=ef150857-6aed-59dc-bbb8-e5c6367163c3&skoid=5bfb38a5-43fb-4c63-80a1-6ae1e97e2e16&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-22T16%3A02%3A55Z&ske=2026-09-23T16%3A02%3A55Z&sks=b&skv=2026-02-06&sig=blzWPvl8Iw7/lXwrWgnUoccjd36IxL5qWm0iwUXQrY8%3D' -o LAB-Scene-IR-v1.zip
+          test "$(stat -c%s LAB-Scene-IR-v1.zip)" -eq 232793
+          echo 'ac16a00c5b34be0e72a2e703b6e4eac065b3a80d6f59b2beafaef53511a03205  LAB-Scene-IR-v1.zip' | sha256sum -c -
+          unzip -t LAB-Scene-IR-v1.zip
+          unzip -p LAB-Scene-IR-v1.zip canvas_003_meta.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-scene-ir-v1
+          name: LAB Still Alive Scene IR v1
+          body: |
+            Native reconstruction data decoded from the original ACTKOOL v1.25 project.
+            Contains all 109 canvas metadata/tile grids, 838 gadget placements,
+            canvas 003 preview and original solid-tile collision mask.
+          files: LAB-Scene-IR-v1.zip
+          overwrite_files: true
