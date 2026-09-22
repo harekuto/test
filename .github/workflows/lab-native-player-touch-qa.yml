@@ -1,0 +1,69 @@
+name: LAB Native Player Touch QA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-player-touch-qa.yml'
+      - 'labnative/player_smoke.sh'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: lab-native-player-touch-qa
+  cancel-in-progress: true
+
+jobs:
+  touch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LAB-Native-Player-Prototype
+          path: artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: harekuto/test
+          run-id: 35723114043
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+
+      - name: Real mapped touch QA
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_7
+          cores: 2
+          ram-size: 3072M
+          heap-size: 512M
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
+          script: bash labnative/player_smoke.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LAB-Native-Player-Touch-QA
+          path: |
+            player-pid.txt
+            player-pid-after.txt
+            player-start.png
+            player-after-right.png
+            player-after-jump.png
+            player-after-input.png
+            player-log.txt
+            player-final-log.txt
+            player-screen-hashes.txt
+            touch-map.txt
+          if-no-files-found: ignore
+          retention-days: 30
