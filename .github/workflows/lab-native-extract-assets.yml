@@ -1,0 +1,86 @@
+name: Extract LAB ACTKOOL Native Assets
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lab-native-extract-assets.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+      - name: Install extraction tools
+        run: |
+          set -eux
+          python3 -m pip install --upgrade gdown
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full file
+      - name: Download original LAB archive
+        run: |
+          set -eux
+          mkdir -p work/game work/assets
+          gdown 'https://drive.google.com/uc?id=16jP6BmHNz6oeKd_yNS5EhQh1r2isOhOf' -O work/LAB.rar
+          test -s work/LAB.rar
+          sha256sum work/LAB.rar | tee work/original-sha256.txt
+          7z x -y work/LAB.rar -owork/game >/dev/null
+          find work/game -maxdepth 3 -type f -printf '%P %s bytes\n' | sort | tee work/game-files.txt
+      - name: Build IGMaker extractor
+        run: |
+          set -eux
+          git clone https://github.com/C-Sharper-Repo/IGMaker-Extractor.git work/igextract
+          dotnet build work/igextract/IGMaker.Tools.CLI/IGMaker.Tools.CLI.csproj -c Release
+          CLI="$(find work/igextract/IGMaker.Tools.CLI/bin/Release -type f -name 'IGMaker.Tools.CLI.dll' -print -quit)"
+          test -n "$CLI"
+          echo "IG_CLI=$CLI" >> "$GITHUB_ENV"
+      - name: Extract ACTKOOL assets
+        run: |
+          set -eux
+          ROOT="$(dirname "$(find work/game -type f -name '*.actbin' -print -quit)")"
+          test -n "$ROOT"
+          echo "GAME_ROOT=$ROOT" | tee work/game-root.txt
+          dotnet "$IG_CLI" -i "$ROOT" -o work/assets -f -s -g -ll 3 -lp work/extractor.log
+          find work/assets -type f -printf '%P %s bytes\n' | sort | tee work/asset-files.txt
+          echo "PNG_COUNT=$(find work/assets -type f -iname '*.png' | wc -l)" | tee work/counts.txt
+          echo "WAV_COUNT=$(find work/assets -type f -iname '*.wav' | wc -l)" | tee -a work/counts.txt
+          echo "TOTAL_FILES=$(find work/assets -type f | wc -l)" | tee -a work/counts.txt
+          sha256sum $(find work/assets -type f -iname '*.png' | sort | head -20) > work/first-png-sha256.txt || true
+      - name: Create texture contact sheet metadata
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          import json
+          rows=[]
+          for p in sorted(Path("work/assets").rglob("*.png")):
+              try:
+                  with Image.open(p) as im:
+                      rows.append({"path":p.as_posix(),"w":im.width,"h":im.height})
+              except Exception:
+                  pass
+          Path("work/texture-metadata.json").write_text(json.dumps(rows,indent=2),encoding="utf-8")
+          print("textures",len(rows))
+          PY
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAB-ACTKOOL-Native-Assets
+          path: |
+            work/assets/
+            work/original-sha256.txt
+            work/game-files.txt
+            work/asset-files.txt
+            work/counts.txt
+            work/texture-metadata.json
+            work/extractor.log
+          compression-level: 0
+          retention-days: 14
