@@ -62,8 +62,8 @@ if [ "$RIGHT_SHA" = "$START_SHA" ]; then
   exit 1
 fi
 
-adb shell input tap "$JX" "$JY"
-sleep 0.25
+adb shell input swipe "$JX" "$JY" "$JX" "$JY" 350
+sleep 0.20
 adb exec-out screencap -p > player-after-jump.png
 sleep 2
 adb exec-out screencap -p > player-after-input.png
