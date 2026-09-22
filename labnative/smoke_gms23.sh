@@ -17,7 +17,7 @@ adb logcat -d -v threadtime > runtime.log || true
 
 grep -E -i 'yoyo|gamemaker|runner|game\.droid|fatal|exception|sigsegv|error' runtime.log | tail -300 > runtime-summary.txt || true
 
-if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|Fatal signal|CObjectGM::LoadFromChunk|AndroidRuntime.*FATAL' runtime.log >/dev/null; then
+if grep -E -i 'FATAL EXCEPTION|SIGSEGV|SIGABRT|Fatal signal|CObjectGM::LoadFromChunk|AndroidRuntime.*FATAL|FATAL ERROR in|ERROR in[[:space:]]+action number|ShowMessage.*FATAL' runtime.log >/dev/null; then
   cat runtime-summary.txt
   exit 1
 fi
