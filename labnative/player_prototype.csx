@@ -106,7 +106,7 @@ vk_reload = virtual_key_add(430, 250, 80, 70, ord(""W""));
 vk_guard = virtual_key_add(335, 340, 75, 80, 161);
 vk_back = virtual_key_add(24, 260, 86, 70, 160);
 vk_menu = virtual_key_add(230, 18, 88, 46, vk_space);
-vk_tab = virtual_key_add(326, 18, 72, 46, vk_tab);
+vk_tab_button = virtual_key_add(326, 18, 72, 46, vk_tab);
 
 melee_was_down = false;
 gun_was_down = false;
