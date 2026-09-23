@@ -186,7 +186,7 @@ public final class LabStillAliveBootstrap {
             data.put("audioDriver", AudioDrivers.ALSA);
             data.put("wincomponents", Container.FALLBACK_WINCOMPONENTS);
             data.put("box64Preset", Box64Preset.STABILITY);
-            data.put("envVars", Container.DEFAULT_ENV_VARS + " WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003 WINEDEBUG=-all");
+            data.put("envVars", "ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=true mesa_glthread=false WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003");
             manager.createContainerAsync(data, container -> {
                 if (container == null) {
                     Toast.makeText(activity, "Could not create LAB runtime", Toast.LENGTH_LONG).show();
