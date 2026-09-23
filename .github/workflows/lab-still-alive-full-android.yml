@@ -149,22 +149,84 @@ jobs:
           rm -rf work/apk-unpacked
           mkdir -p work/apk-unpacked
           unzip -q "$APK" -d work/apk-unpacked
-          if grep -aR -n -F '/data/data/com.winlator' work/apk-unpacked/classes*.dex work/apk-unpacked/lib 2>/dev/null; then
-            echo "Old Winlator sandbox path remains in compiled APK"
-            exit 1
-          fi
-          grep -aR -n -F '/data/data/com.harekuto' work/apk-unpacked/classes*.dex work/apk-unpacked/lib 2>/dev/null | head -20 | tee work/compiled-package-paths.txt || true
 
-          unzip -p "$APK" assets/rootfs.tzst > work/rootfs-from-apk.tzst
-          rm -rf work/rootfs-audit
-          mkdir -p work/rootfs-audit
-          tar --zstd -xf work/rootfs-from-apk.tzst -C work/rootfs-audit
-          if grep -aR -n -F '/data/data/com.winlator' work/rootfs-audit 2>/dev/null; then
-            echo "Old Winlator sandbox path remains in embedded rootfs"
-            exit 1
-          fi
-          grep -aR -l -F '/data/data/com.harekuto' work/rootfs-audit 2>/dev/null | head -20 | tee work/rootfs-package-paths.txt
-          test -s work/rootfs-package-paths.txt
+          python - <<'PY'
+          from pathlib import Path
+          old=b"/data/data/com.winlator"
+          new=b"/data/data/com.harekuto"
+          root=Path("work/apk-unpacked")
+          old_hits=[]
+          new_hits=[]
+          candidates=[root/"classes.dex"]
+          candidates.extend((root/"lib").rglob("*"))
+          for p in candidates:
+              if not p.is_file() or p.is_symlink():
+                  continue
+              data=p.read_bytes()
+              if old in data:
+                  old_hits.append(str(p.relative_to(root)))
+              n=data.count(new)
+              if n:
+                  new_hits.append((str(p.relative_to(root)),n))
+          if old_hits:
+              raise SystemExit("Old Winlator sandbox path remains in compiled APK: "+", ".join(old_hits))
+          Path("work/compiled-package-paths.txt").write_text(
+              "\n".join(f"{name}: {count}" for name,count in new_hits)+"\n"
+          )
+          if not new_hits:
+              raise SystemExit("Compiled APK contains no patched LAB sandbox path")
+          PY
+
+          rm -rf work/package-asset-audit
+          mkdir -p work/package-asset-audit
+          for ASSET in             rootfs.tzst             rootfs_patches.tzst             box64/box64-0.4.4.tzst             graphics_driver/gladio-1.1.tzst             container_pattern.tzst; do
+            SAFE_NAME="$(echo "$ASSET" | tr '/' '_')"
+            mkdir -p "work/package-asset-audit/$SAFE_NAME"
+            unzip -p "$APK" "assets/$ASSET" > "work/package-asset-audit/$SAFE_NAME.tzst"
+            tar --zstd -xf "work/package-asset-audit/$SAFE_NAME.tzst" -C "work/package-asset-audit/$SAFE_NAME"
+          done
+
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          old=b"/data/data/com.winlator"
+          new=b"/data/data/com.harekuto"
+          old_text=old.decode()
+          new_text=new.decode()
+          base=Path("work/package-asset-audit")
+          lines=[]
+          old_hits=[]
+          new_total=0
+          for root in sorted(p for p in base.iterdir() if p.is_dir()):
+              byte_hits=0
+              link_hits=0
+              for current, dirs, files in os.walk(root, followlinks=False):
+                  cp=Path(current)
+                  for name in list(dirs):
+                      p=cp/name
+                      if p.is_symlink():
+                          target=os.readlink(p)
+                          if old_text in target: old_hits.append(f"{root.name}:{p.relative_to(root)} -> {target}")
+                          link_hits += target.count(new_text)
+                          dirs.remove(name)
+                  for name in files:
+                      p=cp/name
+                      if p.is_symlink():
+                          target=os.readlink(p)
+                          if old_text in target: old_hits.append(f"{root.name}:{p.relative_to(root)} -> {target}")
+                          link_hits += target.count(new_text)
+                          continue
+                      data=p.read_bytes()
+                      if old in data: old_hits.append(f"{root.name}:{p.relative_to(root)}")
+                      byte_hits += data.count(new)
+              lines.append(f"{root.name}: bytes={byte_hits} symlinks={link_hits}")
+              new_total += byte_hits + link_hits
+          if old_hits:
+              raise SystemExit("Old sandbox path remains in embedded runtime assets: "+", ".join(old_hits[:20]))
+          if new_total < 450:
+              raise SystemExit(f"Embedded runtime sandbox-path audit unexpectedly low: {new_total}")
+          Path("work/rootfs-package-paths.txt").write_text("\n".join(lines)+"\n")
+          PY
 
           mkdir -p dist
           FINAL='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
