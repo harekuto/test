@@ -369,6 +369,41 @@ new_controls = '''        if (shortcut != null) {
 if old_controls not in s:
     raise SystemExit("XServer controls anchor missing")
 s = s.replace(old_controls, new_controls, 1)
+old_enable_logs = 'boolean enableLogs = preferences.getBoolean("enable_wine_debug", false) || preferences.getInt("box64_logs", 0) >= 1;'
+new_enable_logs = 'boolean enableLogs = getIntent().getBooleanExtra("lab_debug", false) || preferences.getBoolean("enable_wine_debug", false) || preferences.getInt("box64_logs", 0) >= 1;'
+if old_enable_logs not in s:
+    raise SystemExit("XServer enableLogs anchor missing")
+s = s.replace(old_enable_logs, new_enable_logs, 1)
+
+old_wine_debug = '''        boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", false);
+        String wineDebugChannels = preferences.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
+        envVars.put("WINEDEBUG", enableWineDebug && !wineDebugChannels.isEmpty() ? "+"+wineDebugChannels.replace(",", ",+") : "-all");'''
+new_wine_debug = '''        boolean labDebug = getIntent().getBooleanExtra("lab_debug", false);
+        boolean enableWineDebug = labDebug || preferences.getBoolean("enable_wine_debug", false);
+        String wineDebugChannels = labDebug ? "seh,loaddll" : preferences.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
+        envVars.put("WINEDEBUG", enableWineDebug && !wineDebugChannels.isEmpty() ? "+"+wineDebugChannels.replace(",", ",+") : "-all");'''
+if old_wine_debug not in s:
+    raise SystemExit("XServer Wine debug anchor missing")
+s = s.replace(old_wine_debug, new_wine_debug, 1)
+
+old_setup = '''        setupUI();
+
+        Executors.newSingleThreadExecutor().execute(() -> {'''
+new_setup = '''        setupUI();
+
+        if (getIntent().getBooleanExtra("lab_debug", false)) {
+            xServerView.postDelayed(() -> {
+                if (!flags[0] && debugDialog != null && !isFinishing()) {
+                    preloaderDialog.closeOnUiThread();
+                    debugDialog.show();
+                }
+            }, 35000);
+        }
+
+        Executors.newSingleThreadExecutor().execute(() -> {'''
+if old_setup not in s:
+    raise SystemExit("XServer startup watchdog anchor missing")
+s = s.replace(old_setup, new_setup, 1)
 xserver.write_text(s, encoding="utf-8")
 
 # Remove obsolete broad storage permissions from this standalone build.
