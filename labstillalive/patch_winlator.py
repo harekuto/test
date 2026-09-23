@@ -9,8 +9,8 @@ app = root / "app"
 gradle = app / "build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto.labstillalive'")
-s = s.replace('versionCode 33', 'versionCode 128')
-s = s.replace('versionName "11.2"', 'versionName "1.25-android-port4-directwine"')
+s = s.replace('versionCode 33', 'versionCode 129')
+s = s.replace('versionName "11.2"', 'versionName "1.25-android-port5-genericgl"')
 gradle.write_text(s, encoding="utf-8")
 
 manifest = app / "src/main/AndroidManifest.xml"
@@ -181,10 +181,10 @@ public final class LabStillAliveBootstrap {
             JSONObject data = new JSONObject();
             data.put("name", CONTAINER_NAME);
             data.put("screenSize", "640x480");
-            data.put("graphicsDriver", GraphicsDrivers.getDefaultDriver(activity));
+            data.put("graphicsDriver", GraphicsDrivers.VORTEK + "," + GraphicsDrivers.GLADIO);
             data.put("dxwrapper", DXWrappers.WINED3D);
             data.put("audioDriver", AudioDrivers.ALSA);
-            data.put("wincomponents", Container.DEFAULT_WINCOMPONENTS);
+            data.put("wincomponents", Container.FALLBACK_WINCOMPONENTS);
             data.put("box64Preset", Box64Preset.STABILITY);
             data.put("envVars", Container.DEFAULT_ENV_VARS + " WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003 WINEDEBUG=-all");
             manager.createContainerAsync(data, container -> {
@@ -203,13 +203,13 @@ public final class LabStillAliveBootstrap {
 
     private static void configureContainer(MainActivity activity, Container container) {
         container.setScreenSize("640x480");
-        container.setGraphicsDriver(GraphicsDrivers.getDefaultDriver(activity));
-        container.setDXWrapper(DXWrappers.WINED3D);
+        container.setGraphicsDriver(GraphicsDrivers.VORTEK + "," + GraphicsDrivers.GLADIO);
+        container.setDXWrapper(DXWrappers.WINED3D);\n        container.setDXWrapperConfig("renderer=gl,csmt=0,strict_shader_math=1,VideoMemorySize=512");
         container.setAudioDriver(AudioDrivers.ALSA);
-        container.setWinComponents(Container.DEFAULT_WINCOMPONENTS);
+        container.setWinComponents(Container.FALLBACK_WINCOMPONENTS);
         container.setBox64Preset(Box64Preset.STABILITY);
         container.setStartupSelection(Container.STARTUP_SELECTION_NORMAL);
-        container.setEnvVars(Container.DEFAULT_ENV_VARS + " WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003");
+        container.setEnvVars("ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=true mesa_glthread=false WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003");
         container.saveData();
     }
     private static void provisionAndLaunch(MainActivity activity, Container container) {
@@ -264,7 +264,7 @@ public final class LabStillAliveBootstrap {
                     intent.putExtra("lab_controls_profile", PROFILE_ID);
                     intent.putExtra("lab_force_fullscreen", false);
                     intent.putExtra("lab_debug", true);
-                    intent.putExtra("lab_direct_wine", true);
+                    intent.putExtra("lab_direct_wine", false);\n                    intent.putExtra("lab_minimal_setup", true);\n                    intent.putExtra("lab_generic_gl", true);
                     intent.putExtra("lab_dos_exec", "C:\\\\LAB-Still-Alive\\\\LAB-Still Alive- Ver.1.25.exe");
                     activity.startActivity(intent);
                 });
@@ -519,5 +519,5 @@ manifest.write_text(s, encoding="utf-8")
 print("LAB_PATCH_OK")
 print("applicationId=com.harekuto.labstillalive")
 print("profile=99 (controls-99.icp)")
-print("launch=direct Wine explorer; graphics=auto-detect; process diagnostics=on")
+print("launch=Winlator handler; graphics=generic Gladio/OpenGL; minimal LAB components; staged diagnostics=on")
 print("payload=assets/lab_payload.zip (injected after build)")
