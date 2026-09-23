@@ -511,16 +511,17 @@ lab_setup_method = '''    private void setupLabWineSystemFiles() {
         if (patchedVersion != rfsVersion) {
             labLog("rootfs-patches:start rfs=" + rfsVersion);
             File rootDir = rootFS.getRootDir();
+            FileUtils.delete(new File(rootDir, "/opt/apps"));
             boolean rootPatchOk = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
             File pulseDir = new File(getFilesDir(), "pulseaudio");
             if (!pulseDir.isDirectory()) pulseDir.mkdirs();
             boolean pulsePatchOk = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", pulseDir);
             if (!rootPatchOk || !pulsePatchOk) throw new IllegalStateException("Winlator compatibility patch extraction failed root=" + rootPatchOk + " pulse=" + pulsePatchOk);
-            WineUtils.applySystemTweaks(this, wineInfo);
             preferences.edit().putInt("lab_rootfs_patch_version", rfsVersion).apply();
             labLog("rootfs-patches:done");
         }
 
+        WineUtils.applySystemTweaks(this, wineInfo);
         labLog("registry:verify");
         verifyUserRegistry();
 
@@ -551,7 +552,6 @@ lab_setup_method = '''    private void setupLabWineSystemFiles() {
         container.putExtra("appVersion", String.valueOf(AppUtils.getVersionCode(this)));
         container.putExtra("rfsVersion", String.valueOf(rfsVersion));
         container.putExtra("startupSelection", String.valueOf(Container.STARTUP_SELECTION_NORMAL));
-        container.putExtra("audioDriver", audioDriver);
         container.putExtra("labSetup", "v5");
         container.saveData();
         labLog("wine-system:minimal-ready");
