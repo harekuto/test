@@ -204,7 +204,8 @@ public final class LabStillAliveBootstrap {
     private static void configureContainer(MainActivity activity, Container container) {
         container.setScreenSize("640x480");
         container.setGraphicsDriver(GraphicsDrivers.VORTEK + "," + GraphicsDrivers.GLADIO);
-        container.setDXWrapper(DXWrappers.WINED3D);\n        container.setDXWrapperConfig("renderer=gl,csmt=0,strict_shader_math=1,VideoMemorySize=512");
+        container.setDXWrapper(DXWrappers.WINED3D);
+        container.setDXWrapperConfig("renderer=gl,csmt=0,strict_shader_math=1,VideoMemorySize=512");
         container.setAudioDriver(AudioDrivers.ALSA);
         container.setWinComponents(Container.FALLBACK_WINCOMPONENTS);
         container.setBox64Preset(Box64Preset.STABILITY);
@@ -264,7 +265,9 @@ public final class LabStillAliveBootstrap {
                     intent.putExtra("lab_controls_profile", PROFILE_ID);
                     intent.putExtra("lab_force_fullscreen", false);
                     intent.putExtra("lab_debug", true);
-                    intent.putExtra("lab_direct_wine", false);\n                    intent.putExtra("lab_minimal_setup", true);\n                    intent.putExtra("lab_generic_gl", true);
+                    intent.putExtra("lab_direct_wine", false);
+                    intent.putExtra("lab_minimal_setup", true);
+                    intent.putExtra("lab_generic_gl", true);
                     intent.putExtra("lab_dos_exec", "C:\\\\LAB-Still-Alive\\\\LAB-Still Alive- Ver.1.25.exe");
                     activity.startActivity(intent);
                 });
