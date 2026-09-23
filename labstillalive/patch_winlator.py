@@ -9,8 +9,8 @@ app = root / "app"
 gradle = app / "build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto.labstillalive'")
-s = s.replace('versionCode 33', 'versionCode 126')
-s = s.replace('versionName "11.2"', 'versionName "1.25-android-port2-safe"')
+s = s.replace('versionCode 33', 'versionCode 127')
+s = s.replace('versionName "11.2"', 'versionName "1.25-android-port3-autogpu"')
 gradle.write_text(s, encoding="utf-8")
 
 manifest = app / "src/main/AndroidManifest.xml"
@@ -172,6 +172,7 @@ public final class LabStillAliveBootstrap {
             }
         }
         if (found != null) {
+            configureContainer(activity, found);
             provisionAndLaunch(activity, found);
             return;
         }
@@ -180,7 +181,7 @@ public final class LabStillAliveBootstrap {
             JSONObject data = new JSONObject();
             data.put("name", CONTAINER_NAME);
             data.put("screenSize", "640x480");
-            data.put("graphicsDriver", GraphicsDrivers.TURNIP + "," + GraphicsDrivers.GLADIO);
+            data.put("graphicsDriver", GraphicsDrivers.getDefaultDriver(activity));
             data.put("dxwrapper", DXWrappers.WINED3D);
             data.put("audioDriver", AudioDrivers.ALSA);
             data.put("wincomponents", Container.DEFAULT_WINCOMPONENTS);
@@ -191,6 +192,7 @@ public final class LabStillAliveBootstrap {
                     Toast.makeText(activity, "Could not create LAB runtime", Toast.LENGTH_LONG).show();
                     return;
                 }
+                configureContainer(activity, container);
                 provisionAndLaunch(activity, container);
             });
         }
@@ -199,6 +201,17 @@ public final class LabStillAliveBootstrap {
         }
     }
 
+    private static void configureContainer(MainActivity activity, Container container) {
+        container.setScreenSize("640x480");
+        container.setGraphicsDriver(GraphicsDrivers.getDefaultDriver(activity));
+        container.setDXWrapper(DXWrappers.WINED3D);
+        container.setAudioDriver(AudioDrivers.ALSA);
+        container.setWinComponents(Container.DEFAULT_WINCOMPONENTS);
+        container.setBox64Preset(Box64Preset.STABILITY);
+        container.setStartupSelection(Container.STARTUP_SELECTION_NORMAL);
+        container.setEnvVars(Container.DEFAULT_ENV_VARS + " WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003");
+        container.saveData();
+    }
     private static void provisionAndLaunch(MainActivity activity, Container container) {
         if (launching) return;
         launching = true;
@@ -249,7 +262,8 @@ public final class LabStillAliveBootstrap {
                     intent.putExtra("container_id", container.id);
                     intent.putExtra("exec_path", gameExe.getPath());
                     intent.putExtra("lab_controls_profile", PROFILE_ID);
-                    intent.putExtra("lab_force_fullscreen", true);
+                    intent.putExtra("lab_force_fullscreen", false);
+                    intent.putExtra("lab_debug", true);
                     activity.startActivity(intent);
                 });
             }
@@ -366,5 +380,5 @@ manifest.write_text(s, encoding="utf-8")
 print("LAB_PATCH_OK")
 print("applicationId=com.harekuto.labstillalive")
 print("profile=99 (controls-99.icp)")
-print("launch=direct exec_path; graphics=turnip,gladio; box64=STABILITY")
+print("launch=direct exec_path; graphics=auto-detect; box64=STABILITY; debug-watchdog=35s")
 print("payload=assets/lab_payload.zip (injected after build)")
