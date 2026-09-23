@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/lab-still-alive-full-android.yml'
       - 'labstillalive/patch_winlator.py'
+      - 'labstillalive/patch_winlator_package_paths.py'
 
 permissions:
   contents: read
@@ -35,7 +36,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libarchive-tools zip unzip
+          sudo apt-get install -y -qq libarchive-tools zip unzip zstd
           python -m pip install --disable-pip-version-check --no-input 'gdown==5.2.0'
 
       - name: Download and verify original LAB v1.25
@@ -82,6 +83,7 @@ jobs:
         run: |
           set -euxo pipefail
           python labstillalive/patch_winlator.py winlator
+          python labstillalive/patch_winlator_package_paths.py winlator | tee work/package-path-patch.txt
           test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
           test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-99.icp
           mkdir -p winlator/app/src/main/assets
@@ -97,7 +99,7 @@ jobs:
           s=s.replace(anchor, anchor+"\n    androidResources {\n        noCompress += ['zip']\n    }\n", 1)
           p.write_text(s)
           PY
-          grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
+          grep -n "applicationId 'com.harekuto'" winlator/app/build.gradle
           grep -n "noCompress" winlator/app/build.gradle
           grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
 
@@ -126,7 +128,7 @@ jobs:
           ZIPALIGN="$ANDROID_HOME/build-tools/35.0.0/zipalign"
 
           "$AAPT" dump badging "$APK" | tee work/apk-badging.txt
-          grep -q "package: name='com.harekuto.labstillalive'" work/apk-badging.txt
+          grep -q "package: name='com.harekuto'" work/apk-badging.txt
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee work/apk-signature.txt
           "$ZIPALIGN" -c -p 4 "$APK" | tee work/apk-zipalign.txt
           unzip -t "$APK" | tee work/apk-zip-test.txt
@@ -140,6 +142,29 @@ jobs:
           grep -Fq 'LAB-Still Alive- Ver.1.25.exe' work/payload-from-apk-list.txt
           grep -Fq 'LAB-Still Alive- Ver.1.25.actbin' work/payload-from-apk-list.txt
           grep -Fq 'LAB-Still Alive- Ver.1.25.actstr' work/payload-from-apk-list.txt
+
+          # The original Winlator binaries/assets were built with an absolute
+          # /data/data/com.winlator path. Shipping any such path under our
+          # applicationId would make Wine/Box64 target another Android sandbox.
+          rm -rf work/apk-unpacked
+          mkdir -p work/apk-unpacked
+          unzip -q "$APK" -d work/apk-unpacked
+          if grep -aR -n -F '/data/data/com.winlator' work/apk-unpacked/classes*.dex work/apk-unpacked/lib 2>/dev/null; then
+            echo "Old Winlator sandbox path remains in compiled APK"
+            exit 1
+          fi
+          grep -aR -n -F '/data/data/com.harekuto' work/apk-unpacked/classes*.dex work/apk-unpacked/lib 2>/dev/null | head -20 | tee work/compiled-package-paths.txt || true
+
+          unzip -p "$APK" assets/rootfs.tzst > work/rootfs-from-apk.tzst
+          rm -rf work/rootfs-audit
+          mkdir -p work/rootfs-audit
+          tar --zstd -xf work/rootfs-from-apk.tzst -C work/rootfs-audit
+          if grep -aR -n -F '/data/data/com.winlator' work/rootfs-audit 2>/dev/null; then
+            echo "Old Winlator sandbox path remains in embedded rootfs"
+            exit 1
+          fi
+          grep -aR -l -F '/data/data/com.harekuto' work/rootfs-audit 2>/dev/null | head -20 | tee work/rootfs-package-paths.txt
+          test -s work/rootfs-package-paths.txt
 
           mkdir -p dist
           FINAL='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
@@ -168,4 +193,7 @@ jobs:
             work/payload-from-apk-list.txt
             work/apk-sha256.txt
             work/apk-size.txt
+            work/package-path-patch.txt
+            work/compiled-package-paths.txt
+            work/rootfs-package-paths.txt
           retention-days: 30

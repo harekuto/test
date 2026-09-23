@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/lab-still-alive-android.yml'
       - 'labstillalive/patch_winlator.py'
+      - 'labstillalive/patch_winlator_package_paths.py'
 
 permissions:
   contents: read
@@ -28,11 +29,17 @@ jobs:
           cd winlator
           git checkout a030f552f452158a2db64fdb32b490fa19c0b48d
 
+      - name: Install package-path patch tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+
       - name: Patch dedicated LAB launcher
         run: |
           python labstillalive/patch_winlator.py winlator
+          python labstillalive/patch_winlator_package_paths.py winlator | tee lab-package-path-patch.txt
           grep -R "LAB_PATCH_OK" /dev/null || true
-          grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
+          grep -n "applicationId 'com.harekuto'" winlator/app/build.gradle
           grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
           test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
           test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-99.icp
@@ -59,9 +66,18 @@ jobs:
           APK="$(find winlator/app/build/outputs/apk/debug -name '*.apk' -print -quit)"
           test -n "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee lab-runtime-badging.txt
-          grep -q "package: name='com.harekuto.labstillalive'" lab-runtime-badging.txt
+          grep -q "package: name='com.harekuto'" lab-runtime-badging.txt
           unzip -l "$APK" | tee lab-runtime-list.txt
           grep -q 'assets/inputcontrols/profiles/controls-99.icp' lab-runtime-list.txt
+          rm -rf lab-runtime-unpacked
+          mkdir -p lab-runtime-unpacked
+          unzip -q "$APK" -d lab-runtime-unpacked
+          if grep -aR -n -F '/data/data/com.winlator' lab-runtime-unpacked/classes*.dex lab-runtime-unpacked/lib 2>/dev/null; then
+            echo "Old Winlator sandbox path remains in compiled runtime"
+            exit 1
+          fi
+          grep -aR -n -F '/data/data/com.harekuto' lab-runtime-unpacked/classes*.dex lab-runtime-unpacked/lib 2>/dev/null | head -20 | tee lab-runtime-package-paths.txt || true
+
           if grep -q 'assets/lab_payload.zip' lab-runtime-list.txt; then
             echo "Payload unexpectedly present in generic runtime"
             exit 1
@@ -86,6 +102,8 @@ jobs:
             lab-runtime-badging.txt
             lab-runtime-list.txt
             lab-runtime-sha256.txt
+            lab-package-path-patch.txt
+            lab-runtime-package-paths.txt
           retention-days: 14
 
       - uses: actions/upload-artifact@v4

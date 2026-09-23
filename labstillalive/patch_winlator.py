@@ -8,14 +8,14 @@ app = root / "app"
 # ---- Branding / package ----
 gradle = app / "build.gradle"
 s = gradle.read_text(encoding="utf-8")
-s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto.labstillalive'")
-s = s.replace('versionCode 33', 'versionCode 129')
-s = s.replace('versionName "11.2"', 'versionName "1.25-android-port5-genericgl"')
+s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto'")
+s = s.replace('versionCode 33', 'versionCode 130')
+s = s.replace('versionName "11.2"', 'versionName "1.25-android-port6-packagefix"')
 gradle.write_text(s, encoding="utf-8")
 
 manifest = app / "src/main/AndroidManifest.xml"
 s = manifest.read_text(encoding="utf-8")
-s = s.replace('android:authorities="com.winlator.FileProvider"', 'android:authorities="com.harekuto.labstillalive.FileProvider"')
+s = s.replace('android:authorities="com.winlator.FileProvider"', 'android:authorities="com.harekuto.FileProvider"')
 manifest.write_text(s, encoding="utf-8")
 
 strings = app / "src/main/res/values/strings.xml"
@@ -211,6 +211,9 @@ public final class LabStillAliveBootstrap {
         container.setBox64Preset(Box64Preset.STABILITY);
         container.setStartupSelection(Container.STARTUP_SELECTION_NORMAL);
         container.setEnvVars("ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=true mesa_glthread=false WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003");
+        // Force registry/runtime re-application if an older LAB container is ever reused.
+        container.putExtra("audioDriver", null);
+        container.putExtra("dxwrapper", null);
         container.saveData();
     }
     private static void provisionAndLaunch(MainActivity activity, Container container) {
@@ -791,7 +794,7 @@ s = s.replace('    <uses-permission android:name="android.permission.READ_EXTERN
 manifest.write_text(s, encoding="utf-8")
 
 print("LAB_PATCH_OK")
-print("applicationId=com.harekuto.labstillalive")
+print("applicationId=com.harekuto")
 print("profile=99 (controls-99.icp)")
-print("launch=Winlator handler; graphics=generic Gladio/OpenGL; minimal LAB components; staged diagnostics=on")
+print("launch=Winlator handler; package-path=patched; graphics=generic Gladio/OpenGL; minimal LAB components; staged diagnostics=on")
 print("payload=assets/lab_payload.zip (injected after build)")
