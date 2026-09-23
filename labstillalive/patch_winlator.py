@@ -677,6 +677,22 @@ debug_method = """    public static void debug(String line) {
 if debug_anchor not in ps:
     raise SystemExit("ProcessHelper debug anchor missing")
 ps = ps.replace(debug_anchor, debug_method + debug_anchor, 1)
+old_env_loop = '            Map<String, String> environment = processBuilder.environment();\n            for (String name : envVars) environment.put(name, envVars.get(name));'
+new_env_loop = '''            Map<String, String> environment = processBuilder.environment();
+            if (envVars != null) {
+                for (String name : envVars) environment.put(name, envVars.get(name));
+            }
+            debug("[LAB] ProcessBuilder start: " + command);'''
+if old_env_loop not in ps:
+    raise SystemExit("ProcessHelper env loop anchor missing")
+ps = ps.replace(old_env_loop, new_env_loop, 1)
+
+old_pid = '            pidField.setAccessible(false);'
+new_pid = '''            pidField.setAccessible(false);
+            debug("[LAB] ProcessBuilder pid=" + pid);'''
+if old_pid not in ps:
+    raise SystemExit("ProcessHelper pid anchor missing")
+ps = ps.replace(old_pid, new_pid, 1)
 process_helper.write_text(ps, encoding="utf-8")
 
 guest = app / "src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java"
@@ -709,6 +725,62 @@ if old_tail not in gs:
 gs = gs.replace(old_tail, new_tail, 1)
 guest.write_text(gs, encoding="utf-8")
 
+xenv = app / "src/main/java/com/winlator/xenvironment/XEnvironment.java"
+xs = xenv.read_text(encoding="utf-8")
+old_xenv_import = 'import com.winlator.core.FileUtils;'
+new_xenv_import = 'import com.winlator.core.FileUtils;\nimport com.winlator.core.ProcessHelper;'
+if old_xenv_import not in xs:
+    raise SystemExit("XEnvironment import anchor missing")
+xs = xs.replace(old_xenv_import, new_xenv_import, 1)
+
+old_xenv_start = '''    public void startEnvironmentComponents() {
+        FileUtils.clear(getTmpDir());
+        for (EnvironmentComponent environmentComponent : this) environmentComponent.start();
+    }'''
+new_xenv_start = '''    public void startEnvironmentComponents() {
+        FileUtils.clear(getTmpDir());
+        ProcessHelper.debug("[LAB] XEnvironment components=" + components.size());
+        for (EnvironmentComponent environmentComponent : this) {
+            String name = environmentComponent.getClass().getSimpleName();
+            long startedAt = System.currentTimeMillis();
+            ProcessHelper.debug("[LAB] component:start " + name);
+            try {
+                environmentComponent.start();
+                ProcessHelper.debug("[LAB] component:done " + name + " ms=" + (System.currentTimeMillis() - startedAt));
+            }
+            catch (Throwable t) {
+                ProcessHelper.debug("[LAB] component:error " + name + " " + t.getClass().getName() + ": " + t.getMessage());
+                if (t instanceof RuntimeException) throw (RuntimeException)t;
+                throw new RuntimeException(t);
+            }
+        }
+    }'''
+if old_xenv_start not in xs:
+    raise SystemExit("XEnvironment start anchor missing")
+xs = xs.replace(old_xenv_start, new_xenv_start, 1)
+xenv.write_text(xs, encoding="utf-8")
+
+
+# Do not silently swallow archive extraction failures during LAB startup.
+tar_utils = app / "src/main/java/com/winlator/core/TarCompressorUtils.java"
+ts = tar_utils.read_text(encoding="utf-8")
+old_private_extract_catch = '''        catch (IOException e) {
+            return false;
+        }
+    }
+
+    public static long getContentLength'''
+new_private_extract_catch = '''        catch (IOException e) {
+            ProcessHelper.debug("[LAB] archive extract failed: " + e.getClass().getName() + ": " + e.getMessage());
+            return false;
+        }
+    }
+
+    public static long getContentLength'''
+if old_private_extract_catch not in ts:
+    raise SystemExit("TarCompressorUtils extract catch anchor missing")
+ts = ts.replace(old_private_extract_catch, new_private_extract_catch, 1)
+tar_utils.write_text(ts, encoding="utf-8")
 # Remove obsolete broad storage permissions from this standalone build.
 s = manifest.read_text(encoding="utf-8")
 s = s.replace('    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\\n', '')
