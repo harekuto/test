@@ -9,8 +9,8 @@ app = root / "app"
 gradle = app / "build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto.labstillalive'")
-s = s.replace('versionCode 33', 'versionCode 127')
-s = s.replace('versionName "11.2"', 'versionName "1.25-android-port3-autogpu"')
+s = s.replace('versionCode 33', 'versionCode 128')
+s = s.replace('versionName "11.2"', 'versionName "1.25-android-port4-directwine"')
 gradle.write_text(s, encoding="utf-8")
 
 manifest = app / "src/main/AndroidManifest.xml"
@@ -263,7 +263,7 @@ public final class LabStillAliveBootstrap {
                     intent.putExtra("exec_path", gameExe.getPath());
                     intent.putExtra("lab_controls_profile", PROFILE_ID);
                     intent.putExtra("lab_force_fullscreen", false);
-                    intent.putExtra("lab_debug", true);
+                    intent.putExtra("lab_debug", true);\n                    intent.putExtra("lab_direct_wine", true);\n                    intent.putExtra("lab_dos_exec", "C:\\\\LAB-Still-Alive\\\\LAB-Still Alive- Ver.1.25.exe");
                     activity.startActivity(intent);
                 });
             }
@@ -404,7 +404,109 @@ new_setup = '''        setupUI();
 if old_setup not in s:
     raise SystemExit("XServer startup watchdog anchor missing")
 s = s.replace(old_setup, new_setup, 1)
+
+old_guest = '            String guestExecutable = "wine explorer /desktop="+desktopName+","+xServer.screenInfo+" "+getWineStartCommand();'
+new_guest = '''            String guestExecutable;
+            if (getIntent().getBooleanExtra("lab_direct_wine", false)) {
+                String labExec = getIntent().getStringExtra("lab_dos_exec");
+                guestExecutable = "wine explorer /desktop="+desktopName+","+xServer.screenInfo+" \\\""+labExec+"\\\"";
+            }
+            else guestExecutable = "wine explorer /desktop="+desktopName+","+xServer.screenInfo+" "+getWineStartCommand();'''
+if old_guest not in s:
+    raise SystemExit("XServer guest command anchor missing")
+s = s.replace(old_guest, new_guest, 1)
+
+old_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
+            if (!isGenerateWineprefix()) {
+                setupWineSystemFiles();
+                extractGraphicsDriverFiles();
+                changeWineAudioDriver();
+            }
+            setupXEnvironment();
+        });'''
+new_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                if (!isGenerateWineprefix()) {
+                    setupWineSystemFiles();
+                    extractGraphicsDriverFiles();
+                    changeWineAudioDriver();
+                }
+                setupXEnvironment();
+            }
+            catch (Throwable t) {
+                runOnUiThread(() -> {
+                    preloaderDialog.closeOnUiThread();
+                    if (debugDialog != null) {
+                        debugDialog.call("[LAB] startup exception: " + t.getClass().getName() + ": " + t.getMessage());
+                        for (StackTraceElement ste : t.getStackTrace()) debugDialog.call("  at " + ste.toString());
+                        debugDialog.show();
+                    }
+                });
+            }
+        });'''
+if old_worker not in s:
+    raise SystemExit("XServer worker anchor missing")
+s = s.replace(old_worker, new_worker, 1)
 xserver.write_text(s, encoding="utf-8")
+
+# Surface guest-process startup failures instead of swallowing them.
+process_helper = app / "src/main/java/com/winlator/core/ProcessHelper.java"
+ps = process_helper.read_text(encoding="utf-8")
+old_catch = "        catch (Exception e) {}\n        return pid;\n    }"
+new_catch = """        catch (Exception e) {
+            debug("[LAB] ProcessBuilder failed: " + e.getClass().getName() + ": " + e.getMessage());
+            for (StackTraceElement ste : e.getStackTrace()) debug("[LAB]   at " + ste.toString());
+        }
+        return pid;
+    }"""
+if old_catch not in ps:
+    raise SystemExit("ProcessHelper exec catch anchor missing")
+ps = ps.replace(old_catch, new_catch, 1)
+debug_anchor = "    public static void removeAllDebugCallbacks() {"
+debug_method = """    public static void debug(String line) {
+        synchronized (debugCallbacks) {
+            if (!debugCallbacks.isEmpty()) {
+                for (Callback<String> callback : debugCallbacks) callback.call(line);
+            }
+            else if (MainActivity.DEBUG_MODE) System.out.println(line);
+        }
+    }
+
+"""
+if debug_anchor not in ps:
+    raise SystemExit("ProcessHelper debug anchor missing")
+ps = ps.replace(debug_anchor, debug_method + debug_anchor, 1)
+process_helper.write_text(ps, encoding="utf-8")
+
+guest = app / "src/main/java/com/winlator/xenvironment/components/GuestProgramLauncherComponent.java"
+gs = guest.read_text(encoding="utf-8")
+old_exec = """        String command = rootDir+"/usr/local/bin/box64 "+guestExecutable;
+
+        return ProcessHelper.exec(command, envVars, rootDir, (status) -> {"""
+new_exec = """        String command = rootDir+"/usr/local/bin/box64 "+guestExecutable;
+        File box64File = new File(rootDir, "/usr/local/bin/box64");
+        File wineFile = new File(rootDir, rootFS.getWinePath()+"/bin/wine");
+        ProcessHelper.debug("[LAB] guest command: " + command);
+        ProcessHelper.debug("[LAB] box64 exists=" + box64File.isFile() + " exec=" + box64File.canExecute() + " path=" + box64File.getPath());
+        ProcessHelper.debug("[LAB] wine exists=" + wineFile.isFile() + " exec=" + wineFile.canExecute() + " path=" + wineFile.getPath());
+
+        int launchedPid = ProcessHelper.exec(command, envVars, rootDir, (status) -> {"""
+if old_exec not in gs:
+    raise SystemExit("Guest launcher exec anchor missing")
+gs = gs.replace(old_exec, new_exec, 1)
+old_tail = """            if (terminationCallback != null) terminationCallback.call(status);
+        });
+    }"""
+new_tail = """            ProcessHelper.debug("[LAB] guest process exited status=" + status);
+            if (terminationCallback != null) terminationCallback.call(status);
+        });
+        ProcessHelper.debug("[LAB] guest process pid=" + launchedPid);
+        return launchedPid;
+    }"""
+if old_tail not in gs:
+    raise SystemExit("Guest launcher tail anchor missing")
+gs = gs.replace(old_tail, new_tail, 1)
+guest.write_text(gs, encoding="utf-8")
 
 # Remove obsolete broad storage permissions from this standalone build.
 s = manifest.read_text(encoding="utf-8")
@@ -415,5 +517,5 @@ manifest.write_text(s, encoding="utf-8")
 print("LAB_PATCH_OK")
 print("applicationId=com.harekuto.labstillalive")
 print("profile=99 (controls-99.icp)")
-print("launch=direct exec_path; graphics=auto-detect; box64=STABILITY; debug-watchdog=35s")
+print("launch=direct Wine explorer; graphics=auto-detect; process diagnostics=on")
 print("payload=assets/lab_payload.zip (injected after build)")
