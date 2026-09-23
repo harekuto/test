@@ -488,6 +488,166 @@ new_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
 if old_worker not in s:
     raise SystemExit("XServer worker anchor missing")
 s = s.replace(old_worker, new_worker, 1)
+# Dedicated LAB startup avoids unrelated Winlator setup work and uses only
+# the compatibility files actually required by this 32-bit D3D9 executable.
+old_setup_wine = '    private void setupWineSystemFiles() {\n        String appVersion = String.valueOf(AppUtils.getVersionCode(this));'
+new_setup_wine = '''    private void setupWineSystemFiles() {
+        if (getIntent().getBooleanExtra("lab_minimal_setup", false)) {
+            setupLabWineSystemFiles();
+            return;
+        }
+        String appVersion = String.valueOf(AppUtils.getVersionCode(this));'''
+if old_setup_wine not in s:
+    raise SystemExit("LAB setupWineSystemFiles anchor missing")
+s = s.replace(old_setup_wine, new_setup_wine, 1)
+
+setup_xenv_anchor = '    private void setupXEnvironment() {'
+lab_setup_method = '''    private void setupLabWineSystemFiles() {
+        int rfsVersion = rootFS.getVersion();
+        int patchedVersion = preferences.getInt("lab_rootfs_patch_version", -1);
+        if (patchedVersion != rfsVersion) {
+            labLog("rootfs-patches:start rfs=" + rfsVersion);
+            File rootDir = rootFS.getRootDir();
+            boolean rootPatchOk = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
+            File pulseDir = new File(getFilesDir(), "pulseaudio");
+            if (!pulseDir.isDirectory()) pulseDir.mkdirs();
+            boolean pulsePatchOk = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", pulseDir);
+            if (!rootPatchOk || !pulsePatchOk) throw new IllegalStateException("Winlator compatibility patch extraction failed root=" + rootPatchOk + " pulse=" + pulsePatchOk);
+            WineUtils.applySystemTweaks(this, wineInfo);
+            preferences.edit().putInt("lab_rootfs_patch_version", rfsVersion).apply();
+            labLog("rootfs-patches:done");
+        }
+
+        labLog("registry:verify");
+        verifyUserRegistry();
+
+        labLog("dxwrapper:wined3d-prepare");
+        extractDXWrapperFiles();
+
+        if (!wincomponents.equals(container.getExtra("wincomponents"))) {
+            labLog("wincomponents:builtin-prepare");
+            extractWinComponentFiles();
+            container.putExtra("wincomponents", wincomponents);
+            labLog("wincomponents:builtin-done");
+        }
+
+        labLog("dlls:restore-required");
+        restoreBuiltinDllFiles("d3d9.dll", "d3dx9_39.dll", "dsound.dll", "dinput8.dll", "winmm.dll");
+        File wow64 = new File(rootFS.getRootDir(), RootFS.WINEPREFIX + "/drive_c/windows/syswow64");
+        String[] required = {"d3d9.dll", "d3dx9_39.dll", "dsound.dll", "dinput8.dll", "winmm.dll"};
+        for (String name : required) {
+            File dll = new File(wow64, name);
+            if (!dll.isFile() || dll.length() == 0) throw new IllegalStateException("Required 32-bit DLL missing: " + name);
+            labLog("dll-ok:" + name + ":" + dll.length());
+        }
+
+        labLog("dosdevices:prepare");
+        WineUtils.createDosdevicesSymlinks(container, true);
+        WineUtils.changeServicesStatus(container, Container.STARTUP_SELECTION_NORMAL);
+
+        container.putExtra("appVersion", String.valueOf(AppUtils.getVersionCode(this)));
+        container.putExtra("rfsVersion", String.valueOf(rfsVersion));
+        container.putExtra("startupSelection", String.valueOf(Container.STARTUP_SELECTION_NORMAL));
+        container.putExtra("audioDriver", audioDriver);
+        container.putExtra("labSetup", "v5");
+        container.saveData();
+        labLog("wine-system:minimal-ready");
+    }
+
+'''
+if setup_xenv_anchor not in s:
+    raise SystemExit("LAB setupXEnvironment anchor missing")
+s = s.replace(setup_xenv_anchor, lab_setup_method + setup_xenv_anchor, 1)
+
+# For LAB/WineD3D(GL), Vulkan drivers and renderer components are unnecessary.
+old_graphics_method = '    private void extractGraphicsDriverFiles() {\n        envVars.put("vblank_mode", "0");'
+new_graphics_method = '''    private void extractGraphicsDriverFiles() {
+        if (getIntent().getBooleanExtra("lab_generic_gl", false)) {
+            extractLabGenericGL();
+            return;
+        }
+        envVars.put("vblank_mode", "0");'''
+if old_graphics_method not in s:
+    raise SystemExit("LAB graphics method anchor missing")
+s = s.replace(old_graphics_method, new_graphics_method, 1)
+
+touch_help_anchor = '    private void showTouchpadHelpDialog() {'
+lab_graphics_method = '''    private void extractLabGenericGL() {
+        envVars.put("vblank_mode", "0");
+        envVars.put("GLADIO_NO_ERROR", "1");
+        envVars.put("MESA_SHADER_CACHE_DISABLE", "true");
+        envVars.put("mesa_glthread", "false");
+
+        String cacheId = "lab-gladio-" + DefaultVersion.GLADIO;
+        File rootDir = rootFS.getRootDir();
+        File libDir = rootFS.getLibDir();
+        File glLib = new File(libDir, "libGL.so.1.7.0");
+        boolean changed = !cacheId.equals(preferences.getString("current_graphics_driver", "")) || !glLib.isFile();
+        if (changed) {
+            labLog("graphics:install-gladio");
+            FileUtils.delete(new File(libDir, "libvulkan_freedreno.so"));
+            FileUtils.delete(new File(libDir, "libvulkan_vortek.so"));
+            FileUtils.delete(glLib);
+            FileUtils.delete(new File(rootDir, "/usr/share/vulkan/icd.d"));
+            boolean ok = TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "graphics_driver/gladio-" + DefaultVersion.GLADIO + ".tzst", rootDir);
+            if (!ok || !glLib.isFile()) throw new IllegalStateException("Gladio OpenGL extraction failed");
+            preferences.edit().putString("current_graphics_driver", cacheId).apply();
+        }
+        labLog("graphics:gladio-ready size=" + glLib.length());
+    }
+
+'''
+if touch_help_anchor not in s:
+    raise SystemExit("LAB touch-help anchor missing")
+s = s.replace(touch_help_anchor, lab_graphics_method + touch_help_anchor, 1)
+
+# Skip unrelated network/Vulkan renderer components in LAB generic-GL mode.
+old_network = '        environment.addComponent(new NetworkInfoUpdateComponent());'
+new_network = '''        if (!getIntent().getBooleanExtra("lab_minimal_setup", false))
+            environment.addComponent(new NetworkInfoUpdateComponent());'''
+if old_network not in s:
+    raise SystemExit("LAB network component anchor missing")
+s = s.replace(old_network, new_network, 1)
+
+old_vortek = '        if (graphicsDriver[0].equals(GraphicsDrivers.VORTEK)) {'
+new_vortek = '        if (!getIntent().getBooleanExtra("lab_generic_gl", false) && graphicsDriver[0].equals(GraphicsDrivers.VORTEK)) {'
+if old_vortek not in s:
+    raise SystemExit("LAB Vortek component anchor missing")
+s = s.replace(old_vortek, new_vortek, 1)
+
+# Keep the activity alive on guest exit in diagnostic builds and expose the status.
+old_termination = '        guestProgramLauncherComponent.setTerminationCallback((status) -> exit());'
+new_termination = '''        if (getIntent().getBooleanExtra("lab_debug", false)) {
+            guestProgramLauncherComponent.setTerminationCallback((status) -> {
+                labLog("guest-exit status=" + status);
+                runOnUiThread(() -> {
+                    if (debugDialog != null) {
+                        debugDialog.call("[LAB] guest process exited with status=" + status);
+                        debugDialog.show();
+                    }
+                });
+            });
+        }
+        else guestProgramLauncherComponent.setTerminationCallback((status) -> exit());'''
+if old_termination not in s:
+    raise SystemExit("LAB termination anchor missing")
+s = s.replace(old_termination, new_termination, 1)
+
+# Mark entry/exit around component startup and WinHandler.
+old_env_start = '''        environment.startEnvironmentComponents();
+
+        winHandler.start();'''
+new_env_start = '''        labLog("components:start");
+        environment.startEnvironmentComponents();
+        labLog("components:done");
+
+        labLog("winhandler:start");
+        winHandler.start();
+        labLog("winhandler:done");'''
+if old_env_start not in s:
+    raise SystemExit("LAB environment start anchor missing")
+s = s.replace(old_env_start, new_env_start, 1)
+
 xserver.write_text(s, encoding="utf-8")
 
 # Surface guest-process startup failures instead of swallowing them.
