@@ -338,6 +338,22 @@ main.write_text(s, encoding="utf-8")
 xserver = java_dir / "XServerDisplayActivity.java"
 s = xserver.read_text(encoding="utf-8")
 
+old_stage_field = '    private String screenEffectProfile;'
+new_stage_field = '''    private String screenEffectProfile;
+    private volatile String labStartupStage = "activity-created";
+
+    private void labLog(String message) {
+        labStartupStage = message;
+        if (!getIntent().getBooleanExtra("lab_debug", false)) return;
+        runOnUiThread(() -> {
+            if (debugDialog != null) debugDialog.call("[LAB] " + message);
+        });
+    }'''
+if old_stage_field not in s:
+    raise SystemExit("XServer stage field anchor missing")
+s = s.replace(old_stage_field, new_stage_field, 1)
+
+
 old_force = 'renderer.setForceWindowsFullscreen(shortcut != null && shortcut.getExtra("forceFullscreen", "0").equals("1"));'
 new_force = '''renderer.setForceWindowsFullscreen(
             (shortcut != null && shortcut.getExtra("forceFullscreen", "0").equals("1")) ||
@@ -377,6 +393,15 @@ if old_enable_logs not in s:
     raise SystemExit("XServer enableLogs anchor missing")
 s = s.replace(old_enable_logs, new_enable_logs, 1)
 
+old_debug_init = '        if (enableLogs) ProcessHelper.addDebugCallback(debugDialog = new DebugDialog(this));'
+new_debug_init = '''        if (enableLogs) {
+            ProcessHelper.addDebugCallback(debugDialog = new DebugDialog(this));
+            if (getIntent().getBooleanExtra("lab_debug", false)) debugDialog.call("[LAB] debug channel attached");
+        }'''
+if old_debug_init not in s:
+    raise SystemExit("XServer debug init anchor missing")
+s = s.replace(old_debug_init, new_debug_init, 1)
+
 old_wine_debug = '''        boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", false);
         String wineDebugChannels = preferences.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
         envVars.put("WINEDEBUG", enableWineDebug && !wineDebugChannels.isEmpty() ? "+"+wineDebugChannels.replace(",", ",+") : "-all");'''
@@ -392,11 +417,13 @@ old_setup = '''        setupUI();
 
         Executors.newSingleThreadExecutor().execute(() -> {'''
 new_setup = '''        setupUI();
+        labLog("ui-ready");
 
         if (getIntent().getBooleanExtra("lab_debug", false)) {
             xServerView.postDelayed(() -> {
                 if (!flags[0] && debugDialog != null && !isFinishing()) {
                     preloaderDialog.closeOnUiThread();
+                    debugDialog.call("[LAB] watchdog: no renderable window after 35s; last stage=" + labStartupStage);
                     debugDialog.show();
                 }
             }, 35000);
@@ -429,18 +456,30 @@ old_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
 new_worker = '''        Executors.newSingleThreadExecutor().execute(() -> {
             try {
                 if (!isGenerateWineprefix()) {
+                    labLog("wine-system:start");
                     setupWineSystemFiles();
+                    labLog("wine-system:done");
+
+                    labLog("graphics:start");
                     extractGraphicsDriverFiles();
+                    labLog("graphics:done");
+
+                    labLog("audio-registry:start");
                     changeWineAudioDriver();
+                    labLog("audio-registry:done");
                 }
+
+                labLog("xenvironment:start");
                 setupXEnvironment();
+                labLog("xenvironment:returned");
             }
             catch (Throwable t) {
+                labStartupStage = "exception:" + t.getClass().getSimpleName();
                 runOnUiThread(() -> {
                     preloaderDialog.closeOnUiThread();
                     if (debugDialog != null) {
                         debugDialog.call("[LAB] startup exception: " + t.getClass().getName() + ": " + t.getMessage());
-                        for (StackTraceElement ste : t.getStackTrace()) debugDialog.call("  at " + ste.toString());
+                        for (StackTraceElement ste : t.getStackTrace()) debugDialog.call("[LAB]   at " + ste.toString());
                         debugDialog.show();
                     }
                 });
