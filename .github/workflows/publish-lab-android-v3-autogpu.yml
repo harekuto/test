@@ -1,0 +1,58 @@
+name: Publish LAB Android V3 AutoGPU
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-lab-android-v3-autogpu.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified V3 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35899837933
+      - name: Verify exact V3 APK
+        run: |
+          set -euxo pipefail
+          SRC='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          test -f "$SRC"
+          test "$(stat -c%s "$SRC")" -eq 272633953
+          echo '20ca7bb373726dadcef0da60ce7971e6304fd7d95f1e0fcba4a7da578b4ca1e9  '"$SRC" | sha256sum -c -
+          mv "$SRC" 'dist/LAB-Still-Alive-v1.25-Android-v3-AutoGPU.apk'
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-v1.25-android-v3-autogpu
+          name: LAB Still Alive v1.25 Android v3 AutoGPU
+          body: |
+            Startup-hang diagnostic/fix build.
+
+            Changes:
+            - GPU backend is auto-detected by Winlator instead of forcing Turnip
+            - existing LAB container is migrated to the detected GPU backend
+            - WineD3D + Box64 Stability + WINEESYNC=0
+            - MESA_EXTENSION_MAX_YEAR=2003
+            - direct exec_path launch retained
+            - touch profile retained
+            - Force Fullscreen disabled during startup diagnosis
+            - if no game window appears within 35 seconds, Wine debug output opens automatically
+
+            Package: com.harekuto.labstillalive
+            Version code: 127
+            Version: 1.25-android-port3-autogpu
+            SHA-256: 20ca7bb373726dadcef0da60ce7971e6304fd7d95f1e0fcba4a7da578b4ca1e9
+          files: dist/LAB-Still-Alive-v1.25-Android-v3-AutoGPU.apk
+          overwrite_files: true
