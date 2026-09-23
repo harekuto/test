@@ -263,7 +263,9 @@ public final class LabStillAliveBootstrap {
                     intent.putExtra("exec_path", gameExe.getPath());
                     intent.putExtra("lab_controls_profile", PROFILE_ID);
                     intent.putExtra("lab_force_fullscreen", false);
-                    intent.putExtra("lab_debug", true);\n                    intent.putExtra("lab_direct_wine", true);\n                    intent.putExtra("lab_dos_exec", "C:\\\\LAB-Still-Alive\\\\LAB-Still Alive- Ver.1.25.exe");
+                    intent.putExtra("lab_debug", true);
+                    intent.putExtra("lab_direct_wine", true);
+                    intent.putExtra("lab_dos_exec", "C:\\\\LAB-Still-Alive\\\\LAB-Still Alive- Ver.1.25.exe");
                     activity.startActivity(intent);
                 });
             }
