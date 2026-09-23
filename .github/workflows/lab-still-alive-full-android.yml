@@ -83,7 +83,7 @@ jobs:
           set -euxo pipefail
           python labstillalive/patch_winlator.py winlator
           test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
-          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-lab.icp
+          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-99.icp
           mkdir -p winlator/app/src/main/assets
           cp work/lab_payload.zip winlator/app/src/main/assets/lab_payload.zip
           cp work/payload-sha256.txt winlator/app/src/main/assets/lab_payload_sha256.txt
@@ -132,7 +132,7 @@ jobs:
           unzip -t "$APK" | tee work/apk-zip-test.txt
           unzip -l "$APK" | tee work/apk-list.txt
           grep -q 'assets/lab_payload.zip' work/apk-list.txt
-          grep -q 'assets/inputcontrols/profiles/controls-lab.icp' work/apk-list.txt
+          grep -q 'assets/inputcontrols/profiles/controls-99.icp' work/apk-list.txt
 
           unzip -p "$APK" assets/lab_payload.zip > work/payload-from-apk.zip
           cmp work/lab_payload.zip work/payload-from-apk.zip
