@@ -1,0 +1,61 @@
+name: Publish LAB Full Android V2 Safe Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-lab-full-android-v2-safe-release.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified V2 APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35888539202
+
+      - name: Verify and name V2 Safe APK
+        run: |
+          set -euxo pipefail
+          SRC='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          test -f "$SRC"
+          test "$(stat -c%s "$SRC")" -eq 272633257
+          echo '03c6f6c8027be1cac0e76bbe2224730df5af79ed9f7e075857d0014f5e3f7fda  '"$SRC" | sha256sum -c -
+          mv "$SRC" 'dist/LAB-Still-Alive-v1.25-Android-v2-SAFE.apk'
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-v1.25-android-v2-safe
+          name: LAB Still Alive v1.25 Android v2 SAFE
+          body: |
+            Crash-fix build for LAB Still Alive v1.25 Android.
+
+            Changes:
+            - launches the game through Winlator's supported direct exec_path path
+            - fixes bundled touch profile filename/id mapping (controls-99.icp)
+            - avoids the experimental Vortek runtime path
+            - uses WineD3D + Gladio for this old Direct3D 9 game
+            - Box64 STABILITY preset
+            - WINEESYNC=0
+            - MESA_EXTENSION_MAX_YEAR=2003
+            - preserves original LAB v1.25 EXE/ACTBIN/ACTSTR/INI payload
+
+            Package: com.harekuto.labstillalive
+            Version code: 126
+            Version: 1.25-android-port2-safe
+            SHA-256: 03c6f6c8027be1cac0e76bbe2224730df5af79ed9f7e075857d0014f5e3f7fda
+          files: dist/LAB-Still-Alive-v1.25-Android-v2-SAFE.apk
+          overwrite_files: true
