@@ -9,8 +9,8 @@ app = root / "app"
 gradle = app / "build.gradle"
 s = gradle.read_text(encoding="utf-8")
 s = s.replace("applicationId 'com.winlator'", "applicationId 'com.harekuto.labstillalive'")
-s = s.replace('versionCode 33', 'versionCode 125')
-s = s.replace('versionName "11.2"', 'versionName "1.25-android-port1"')
+s = s.replace('versionCode 33', 'versionCode 126')
+s = s.replace('versionName "11.2"', 'versionName "1.25-android-port2-safe"')
 gradle.write_text(s, encoding="utf-8")
 
 manifest = app / "src/main/AndroidManifest.xml"
@@ -100,7 +100,7 @@ profile = {
         }
     ]
 }
-(profiles / "controls-lab.icp").write_text(json.dumps(profile, separators=(",",":")), encoding="utf-8")
+(profiles / "controls-99.icp").write_text(json.dumps(profile, separators=(",",":")), encoding="utf-8")
 
 # ---- Auto-provision and launch ----
 java_dir = app / "src/main/java/com/winlator"
@@ -112,6 +112,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
 
+import com.winlator.box64.Box64Preset;
 import com.winlator.container.AudioDrivers;
 import com.winlator.container.Container;
 import com.winlator.container.ContainerManager;
@@ -179,11 +180,12 @@ public final class LabStillAliveBootstrap {
             JSONObject data = new JSONObject();
             data.put("name", CONTAINER_NAME);
             data.put("screenSize", "640x480");
-            data.put("graphicsDriver", GraphicsDrivers.getDefaultDriver(activity));
+            data.put("graphicsDriver", GraphicsDrivers.TURNIP + "," + GraphicsDrivers.GLADIO);
             data.put("dxwrapper", DXWrappers.WINED3D);
             data.put("audioDriver", AudioDrivers.ALSA);
             data.put("wincomponents", Container.DEFAULT_WINCOMPONENTS);
-            data.put("envVars", Container.DEFAULT_ENV_VARS + " WINEDEBUG=-all");
+            data.put("box64Preset", Box64Preset.STABILITY);
+            data.put("envVars", Container.DEFAULT_ENV_VARS + " WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003 WINEDEBUG=-all");
             manager.createContainerAsync(data, container -> {
                 if (container == null) {
                     Toast.makeText(activity, "Could not create LAB runtime", Toast.LENGTH_LONG).show();
@@ -219,6 +221,9 @@ public final class LabStillAliveBootstrap {
                     marker.createNewFile();
                 }
 
+                File gameExe = new File(gameDir, EXE_NAME);
+                if (!gameExe.isFile()) throw new IllegalStateException("LAB executable missing");
+
                 File desktop = new File(container.getUserDir(), "Desktop");
                 if (!desktop.isDirectory()) desktop.mkdirs();
                 File shortcut = new File(desktop, "LAB-Still-Alive.desktop");
@@ -226,7 +231,7 @@ public final class LabStillAliveBootstrap {
                 String content =
                     "[Desktop Entry]\\n" +
                     "Name=LAB Still Alive\\n" +
-                    "Exec=wine C:\\\\LAB-Still-Alive\\\\" + EXE_NAME + "\\n" +
+                    "Exec=wine C:\\\\LAB-Still-Alive\\\\LAB-Still\\ Alive-\\ Ver.1.25.exe\\n" +
                     "Type=Application\\n" +
                     "StartupWMClass=LAB-Still Alive- Ver.1.25.exe\\n\\n" +
                     "[Extra Data]\\n" +
@@ -235,13 +240,16 @@ public final class LabStillAliveBootstrap {
                     "forceFullscreen=1\\n" +
                     "dxwrapper=wined3d\\n" +
                     "audioDriver=alsa\\n" +
-                    "envVars=WINEDEBUG=-all\\n";
+                    "box64Preset=STABILITY\\n" +
+                    "envVars=WINEESYNC=0 MESA_EXTENSION_MAX_YEAR=2003 WINEDEBUG=-all\\n";
                 FileUtils.writeString(shortcut, content);
 
                 activity.runOnUiThread(() -> {
                     Intent intent = new Intent(activity, XServerDisplayActivity.class);
                     intent.putExtra("container_id", container.id);
-                    intent.putExtra("shortcut_path", shortcut.getPath());
+                    intent.putExtra("exec_path", gameExe.getPath());
+                    intent.putExtra("lab_controls_profile", PROFILE_ID);
+                    intent.putExtra("lab_force_fullscreen", true);
                     activity.startActivity(intent);
                 });
             }
@@ -310,6 +318,45 @@ if old not in s:
 s = s.replace(old, new, 1)
 main.write_text(s, encoding="utf-8")
 
+# Preserve fullscreen and the LAB touch profile on Winlator's direct exec_path route.
+xserver = java_dir / "XServerDisplayActivity.java"
+s = xserver.read_text(encoding="utf-8")
+
+old_force = 'renderer.setForceWindowsFullscreen(shortcut != null && shortcut.getExtra("forceFullscreen", "0").equals("1"));'
+new_force = '''renderer.setForceWindowsFullscreen(
+            (shortcut != null && shortcut.getExtra("forceFullscreen", "0").equals("1")) ||
+            getIntent().getBooleanExtra("lab_force_fullscreen", false)
+        );'''
+if old_force not in s:
+    raise SystemExit("XServer fullscreen anchor missing")
+s = s.replace(old_force, new_force, 1)
+
+old_controls = '''        if (shortcut != null) {
+            String controlsProfile = shortcut.getExtra("controlsProfile");
+            if (!controlsProfile.isEmpty()) {
+                ControlsProfile profile = inputControlsManager.getProfile(Integer.parseInt(controlsProfile));
+                if (profile != null) showInputControls(profile);
+            }
+        }'''
+new_controls = '''        if (shortcut != null) {
+            String controlsProfile = shortcut.getExtra("controlsProfile");
+            if (!controlsProfile.isEmpty()) {
+                ControlsProfile profile = inputControlsManager.getProfile(Integer.parseInt(controlsProfile));
+                if (profile != null) showInputControls(profile);
+            }
+        }
+        else {
+            int labProfileId = getIntent().getIntExtra("lab_controls_profile", 0);
+            if (labProfileId > 0) {
+                ControlsProfile profile = inputControlsManager.getProfile(labProfileId);
+                if (profile != null) showInputControls(profile);
+            }
+        }'''
+if old_controls not in s:
+    raise SystemExit("XServer controls anchor missing")
+s = s.replace(old_controls, new_controls, 1)
+xserver.write_text(s, encoding="utf-8")
+
 # Remove obsolete broad storage permissions from this standalone build.
 s = manifest.read_text(encoding="utf-8")
 s = s.replace('    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>\\n', '')
@@ -318,5 +365,6 @@ manifest.write_text(s, encoding="utf-8")
 
 print("LAB_PATCH_OK")
 print("applicationId=com.harekuto.labstillalive")
-print("profile=99")
+print("profile=99 (controls-99.icp)")
+print("launch=direct exec_path; graphics=turnip,gladio; box64=STABILITY")
 print("payload=assets/lab_payload.zip (injected after build)")
