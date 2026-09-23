@@ -1,0 +1,57 @@
+name: Publish LAB Android V4 DirectWine
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-lab-android-v4-directwine.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download verified V4 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35905932077
+      - name: Verify exact V4 APK
+        run: |
+          set -euxo pipefail
+          SRC='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          test -f "$SRC"
+          test "$(stat -c%s "$SRC")" -eq 272635021
+          echo '9ac7d10cc3ae87505aeabd2d80c41d243ad9ba964067e872ab2a70008fe351e1  '"$SRC" | sha256sum -c -
+          mv "$SRC" 'dist/LAB-Still-Alive-v1.25-Android-v4-DirectWine.apk'
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-v1.25-android-v4-directwine
+          name: LAB Still Alive v1.25 Android v4 DirectWine
+          body: |
+            Startup-path fix and diagnostic build.
+
+            Changes:
+            - bypasses Winlator winhandler.exe for LAB startup
+            - launches LAB directly through wine explorer
+            - keeps GPU autodetection, WineD3D, Box64 Stability, WINEESYNC=0
+            - surfaces silent ProcessBuilder failures in the in-app log
+            - prints Box64/Wine executable presence and guest PID
+            - catches Java startup exceptions and prints the stack trace
+            - keeps the 35-second startup watchdog
+
+            Package: com.harekuto.labstillalive
+            Version code: 128
+            Version: 1.25-android-port4-directwine
+            SHA-256: 9ac7d10cc3ae87505aeabd2d80c41d243ad9ba964067e872ab2a70008fe351e1
+          files: dist/LAB-Still-Alive-v1.25-Android-v4-DirectWine.apk
+          overwrite_files: true
