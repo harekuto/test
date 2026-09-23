@@ -1,0 +1,56 @@
+name: Publish LAB Full Android Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-lab-full-android-release.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35778236579
+
+      - name: Verify exact APK
+        run: |
+          set -euxo pipefail
+          APK='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          test -f "$APK"
+          test "$(stat -c%s "$APK")" -eq 272633162
+          echo '059b71ab3fdb0af240bbdc5485af1828ee17bc3f7f06bf6aba225ca83a510959  '"$APK" | sha256sum -c -
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-v1.25-android-full
+          name: LAB Still Alive v1.25 Android FULL
+          body: |
+            Full Android runtime package for LAB Still Alive v1.25.
+
+            Includes the original LAB v1.25 game payload inside a dedicated Android runtime.
+            Package: com.harekuto.labstillalive
+            SHA-256: 059b71ab3fdb0af240bbdc5485af1828ee17bc3f7f06bf6aba225ca83a510959
+
+            Build validation passed:
+            - Gradle assembleDebug
+            - APK signature verification
+            - zipalign verification
+            - APK ZIP integrity
+            - embedded LAB payload integrity
+          files: dist/LAB-Still-Alive-v1.25-Android-FULL.apk
+          overwrite_files: true
