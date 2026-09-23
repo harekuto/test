@@ -1,0 +1,85 @@
+name: Publish LAB Android V6 PackageFix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-lab-android-v6-packagefix.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified V6 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: LAB-Still-Alive-v1.25-Android-FULL
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 35913079983
+
+      - name: Verify exact V6 APK
+        run: |
+          set -euxo pipefail
+          SRC='dist/LAB-Still-Alive-v1.25-Android-FULL.apk'
+          test -f "$SRC"
+          test "$(stat -c%s "$SRC")" -eq 324171821
+          echo '3d755e90b898106857e3ec0d31d8d8f2e0f90ac5e4dfa76eacf56d370f5713a1  '"$SRC" | sha256sum -c -
+          mv "$SRC" 'dist/LAB-Still-Alive-v1.25-Android-v6-PackageFix.apk'
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: lab-still-alive-v1.25-android-v6-packagefix
+          name: LAB Still Alive v1.25 Android v6 PackageFix
+          body: |
+            Major startup/runtime package-path fix.
+
+            Root cause fixed:
+            Winlator 11.2's Wine/Box64/rootfs/native components contain hardcoded
+            /data/data/com.winlator paths. Previous LAB builds used a different
+            applicationId, so guest components could target an inaccessible Android
+            sandbox before the game process or debug logger started.
+
+            V6 changes:
+            - applicationId changed to com.harekuto
+            - patched hardcoded Android sandbox paths in Winlator source/native code
+            - patched 458 binary path occurrences across embedded runtime archives
+            - patched container-pattern Z: symlink
+            - patched Wine rootfs, rootfs patches, Box64, Gladio, Turnip, VirGL, Vortek
+            - generic OpenGL/Gladio fallback for old D3D9
+            - WineD3D compatibility profile
+            - minimal Wine component setup for LAB imports
+            - explicit d3d9/d3dx9_39/dsound/dinput8/winmm validation
+            - Box64 Stability and WINEESYNC=0
+            - staged startup diagnostics and component-level logging
+            - ProcessBuilder errors are no longer silently swallowed
+
+            QA:
+            - Gradle build passed
+            - APK v2 signature passed
+            - zipalign passed
+            - APK ZIP integrity passed
+            - original LAB payload integrity passed
+            - compiled classes/native libraries contain no old /data/data/com.winlator path
+            - embedded rootfs/Box64/Gladio/container path audit passed
+
+            IMPORTANT:
+            This build uses a new Android package ID. Uninstall previous LAB Still Alive
+            Android builds before installing V6 so you do not accidentally launch the old app.
+
+            Package: com.harekuto
+            Version code: 130
+            Version: 1.25-android-port6-packagefix
+            Size: 324171821 bytes
+            SHA-256: 3d755e90b898106857e3ec0d31d8d8f2e0f90ac5e4dfa76eacf56d370f5713a1
+          files: dist/LAB-Still-Alive-v1.25-Android-v6-PackageFix.apk
+          overwrite_files: true
