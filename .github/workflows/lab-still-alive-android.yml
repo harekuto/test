@@ -35,7 +35,7 @@ jobs:
           grep -n "applicationId 'com.harekuto.labstillalive'" winlator/app/build.gradle
           grep -n "LabStillAliveBootstrap.startWhenReady" winlator/app/src/main/java/com/winlator/MainActivity.java
           test -f winlator/app/src/main/java/com/winlator/LabStillAliveBootstrap.java
-          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-lab.icp
+          test -f winlator/app/src/main/assets/inputcontrols/profiles/controls-99.icp
 
       - uses: actions/setup-java@v4
         with:
@@ -61,7 +61,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee lab-runtime-badging.txt
           grep -q "package: name='com.harekuto.labstillalive'" lab-runtime-badging.txt
           unzip -l "$APK" | tee lab-runtime-list.txt
-          grep -q 'assets/inputcontrols/profiles/controls-lab.icp' lab-runtime-list.txt
+          grep -q 'assets/inputcontrols/profiles/controls-99.icp' lab-runtime-list.txt
           if grep -q 'assets/lab_payload.zip' lab-runtime-list.txt; then
             echo "Payload unexpectedly present in generic runtime"
             exit 1
