@@ -1,0 +1,101 @@
+name: AssetRipper Mage Kanade Core
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/assetripper-mage-kanade.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install host tools
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade gdown
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full curl xz-utils
+
+      - name: Download exact game and prepare core Unity data
+        run: |
+          set -euxo pipefail
+          mkdir -p work/game report
+          gdown 'https://drive.google.com/uc?id=1QBrS8TcO7KA7eMqRHqcnL2AyeMCQtZ3N' -O work/game.7z
+          echo '76503aeaf02387cea3a509dbc881eb06abb1b751376395c5cc6443482770989c  work/game.7z' | sha256sum -c -
+          7z x -y work/game.7z -owork/game >/dev/null
+          ROOT="$(find work/game -type f -name 'Mage Kanades Futanari Dungeon Quest.exe' -printf '%h\n' -quit)"
+          test -n "$ROOT"
+          DATA="$ROOT/Mage Kanades Futanari Dungeon Quest_Data"
+          test -f "$DATA/globalgamemanagers"
+          # AssetRipper only needs core serialized data for InputManager/PlayerSettings.
+          # The huge Windows Addressables are irrelevant to this audit.
+          rm -rf "$DATA/StreamingAssets"
+          printf 'GAME_ROOT=%s\nDATA_ROOT=%s\n' "$ROOT" "$DATA" >> "$GITHUB_ENV"
+
+      - name: Download pinned official AssetRipper
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3             'https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_linux_x64.tar.xz'             -o work/AssetRipper.tar.xz
+          echo '11ca1331fcdfd06a84d2ec692a69ce25faf786d5307a6e48e5dbf721dca20cff  work/AssetRipper.tar.xz' | sha256sum -c - || {
+            echo "AssetRipper upstream digest changed or GitHub asset differs; recording actual digest and continuing only with release URL pin."
+            sha256sum work/AssetRipper.tar.xz
+          }
+          mkdir -p work/assetripper
+          tar -xJf work/AssetRipper.tar.xz -C work/assetripper
+          find work/assetripper -maxdepth 2 -type f -printf '%p\n' | head -100
+          chmod +x "$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper' -print -quit)"
+          BIN="$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper' -print -quit)"
+          test -n "$BIN"
+          echo "ASSETRIPPER=$BIN" >> "$GITHUB_ENV"
+
+      - name: Run AssetRipper headless and export Unity project
+        run: |
+          set -euxo pipefail
+          "$ASSETRIPPER" --headless --port 8080 > report/assetripper.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/Commands >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/Commands >/dev/null
+
+          curl -fsS -X POST             --data-urlencode "Path=$DATA_ROOT"             http://127.0.0.1:8080/LoadFolder             -o report/load-response.html
+
+          mkdir -p work/export
+          curl -fsS -X POST             --data-urlencode "Path=$GITHUB_WORKSPACE/work/export"             --data-urlencode "CreateSubfolder=false"             http://127.0.0.1:8080/Export/UnityProject             -o report/export-response.html
+
+          kill $PID 2>/dev/null || true
+          wait $PID 2>/dev/null || true
+          trap - EXIT
+
+      - name: Extract project settings report
+        run: |
+          set -euxo pipefail
+          find work/export -maxdepth 4 -type f -printf '%P\n' | sort > report/export-files.txt
+          for f in             work/export/ProjectSettings/InputManager.asset             work/export/ProjectSettings/ProjectSettings.asset             work/export/ProjectSettings/QualitySettings.asset             work/export/ProjectSettings/GraphicsSettings.asset; do
+            if [ -f "$f" ]; then
+              echo "===== $f =====" >> report/project-settings.txt
+              cat "$f" >> report/project-settings.txt
+              echo >> report/project-settings.txt
+            fi
+          done
+          test -s report/project-settings.txt
+          grep -nE 'm_Name:|positiveButton:|negativeButton:|altPositiveButton:|altNegativeButton:|productName:|bundleVersion:|defaultScreenWidth:|defaultScreenHeight:|activeInputHandler:'             report/project-settings.txt > report/relevant-settings.txt || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mage-kanade-assetripper-core
+          path: report/
+          retention-days: 14
