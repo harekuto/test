@@ -37,11 +37,9 @@ jobs:
           ROOT="$(find work/game -type f -name 'Mage Kanades Futanari Dungeon Quest.exe' -printf '%h\n' -quit)"
           test -n "$ROOT"
           DATA="$ROOT/Mage Kanades Futanari Dungeon Quest_Data"
-          test -f "$DATA/globalgamemanagers"
-          # AssetRipper only needs core serialized data for InputManager/PlayerSettings.
-          # The huge Windows Addressables are irrelevant to this audit.
-          rm -rf "$DATA/StreamingAssets"
-          printf 'GAME_ROOT=%s\nDATA_ROOT=%s\n' "$ROOT" "$DATA" >> "$GITHUB_ENV"
+          CORE="$DATA/data.unity3d"
+          test -f "$CORE"
+          printf 'GAME_ROOT=%s\nDATA_ROOT=%s\nCORE_UNITY=%s\n' "$ROOT" "$DATA" "$CORE" >> "$GITHUB_ENV"
 
       - name: Download pinned official AssetRipper
         run: |
