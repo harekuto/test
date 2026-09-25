@@ -1,6 +1,12 @@
 from __future__ import annotations
 import sys, json, re
 from pathlib import Path
+
+# This repository also has magekanade/inspect.py. Remove the script directory
+# from module search so it cannot shadow Python's stdlib inspect module.
+_script_dir=str(Path(__file__).resolve().parent)
+sys.path=[p for p in sys.path if str(Path(p or ".").resolve()) != _script_dir]
+
 import UnityPy
 
 root=Path(sys.argv[1])
