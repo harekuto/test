@@ -33,6 +33,7 @@ jobs:
           7z x -y work/game.7z -owork/game >/dev/null
       - name: Parse Unity settings
         run: |
+          set -o pipefail
           python magekanade/unitypy_analyze.py work/game report | tee report/console.txt
       - uses: actions/upload-artifact@v4
         with:
