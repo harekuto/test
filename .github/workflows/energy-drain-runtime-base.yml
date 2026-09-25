@@ -1,0 +1,102 @@
+name: Build Energy Drain Android Runtime Base
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/energy-drain-runtime-base.yml'
+
+permissions:
+  contents: read
+
+env:
+  TEMPLATE_REPO: https://github.com/NEKOBOTMX/rpgmaker-mv-mz-android-studio.git
+  TEMPLATE_COMMIT: 9b98ef8345dc3879d3d4426a41ce8b3b743be2d7
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK pieces
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
+      - name: Clone pinned wrapper
+        run: |
+          git clone --filter=blob:none --no-checkout "$TEMPLATE_REPO" wrapper
+          cd wrapper
+          git checkout --detach "$TEMPLATE_COMMIT"
+          rm -rf .git
+      - name: Configure Energy Drain runtime
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          root=Path('wrapper/android')
+          p=root/'build.gradle'
+          s=p.read_text()
+          s=s.replace('version "8.7.3"','version "8.10.0"')
+          p.write_text(s)
+          p=root/'gradle/wrapper/gradle-wrapper.properties'
+          s=p.read_text()
+          s=re.sub(r'gradle-[^/]+-bin\.zip','gradle-8.11.1-bin.zip',s)
+          p.write_text(s)
+          p=root/'app/build.gradle'
+          s=p.read_text()
+          s=s.replace('compileSdk 35','compileSdk 36')
+          s=s.replace('applicationId "com.nekobot.rpgnekos"','applicationId "com.harekuto.energydrain"')
+          s=s.replace('targetSdk 35','targetSdk 36')
+          s=s.replace('versionCode 1','versionCode 100')
+          s=s.replace('versionName "1.0.0"','versionName "1.0-android-port1"')
+          marker='    compileOptions {'
+          insert='''    androidResources {\n        noCompress += ["ogg", "m4a", "mp3", "wav", "mp4", "webm", "png", "jpg", "jpeg"]\n    }\n\n'''
+          if 'androidResources {' not in s:
+              s=s.replace(marker,insert+marker)
+          p.write_text(s)
+          p=root/'app/src/main/res/values/strings.xml'
+          s=p.read_text()
+          s=re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">Energy Drain</string>',s)
+          p.write_text(s)
+          p=root/'app/src/main/AndroidManifest.xml'
+          s=p.read_text()
+          if 'android:largeHeap=' not in s:
+              s=s.replace('android:allowBackup="false"','android:allowBackup="false"\n        android:largeHeap="true"')
+          if 'android:hardwareAccelerated=' not in s:
+              s=s.replace('android:largeHeap="true"','android:largeHeap="true"\n        android:hardwareAccelerated="true"')
+          if 'android:enableOnBackInvokedCallback=' not in s:
+              s=s.replace('android:hardwareAccelerated="true"','android:hardwareAccelerated="true"\n        android:enableOnBackInvokedCallback="false"')
+          p.write_text(s)
+
+          www=root/'app/src/main/assets/www'
+          import shutil
+          shutil.rmtree(www,ignore_errors=True)
+          www.mkdir(parents=True)
+          (www/'index.html').write_text('''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#000;color:#fff;font-family:sans-serif">Energy Drain runtime placeholder</body></html>''')
+      - name: Build runtime APK
+        working-directory: wrapper/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace --no-daemon --console=plain
+      - name: Package runtime and signing tools
+        run: |
+          mkdir -p out/tools/lib
+          cp wrapper/android/app/build/outputs/apk/debug/app-debug.apk out/Energy-Drain-Android-runtime.apk
+          cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" out/tools/
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" out/tools/
+          cp "$ANDROID_HOME/build-tools/36.0.0/lib/apksigner.jar" out/tools/lib/
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging out/Energy-Drain-Android-runtime.apk > out/runtime-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs out/Energy-Drain-Android-runtime.apk > out/runtime-signature.txt
+          sha256sum out/Energy-Drain-Android-runtime.apk > out/runtime.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Energy-Drain-Android-runtime-base
+          path: out/
+          compression-level: 0
+          retention-days: 7
