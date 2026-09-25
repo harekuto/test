@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/build-energy-drain-wrapper.yml'
+      - 'energydrain/configure_wrapper.py'
 
 permissions:
   contents: read
@@ -13,9 +14,6 @@ permissions:
 env:
   TEMPLATE_REPO: https://github.com/NEKOBOTMX/rpgmaker-mv-mz-android-studio.git
   TEMPLATE_COMMIT: 9b98ef8345dc3879d3d4426a41ce8b3b743be2d7
-  PACKAGE: com.harekuto.energydrain
-  VERSION_NAME: 1.0.0-android-port1
-  VERSION_CODE: 1
 
 jobs:
   build:
@@ -27,13 +25,16 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install Android build tools
         shell: bash
         run: |
           set -euxo pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Prepare wrapper
         shell: bash
@@ -44,61 +45,7 @@ jobs:
           git checkout --detach "$TEMPLATE_COMMIT"
           rm -rf .git
           cd ..
-          python3 - <<'PY'
-          from pathlib import Path
-          import re, xml.etree.ElementTree as ET
-
-          root=Path('wrapper/android')
-          gradle=root/'app/build.gradle'
-          s=gradle.read_text()
-          s=re.sub(r'applicationId\s+"[^"]+"', 'applicationId "com.harekuto.energydrain"', s)
-          s=re.sub(r'versionCode\s+\d+', 'versionCode 1', s)
-          s=re.sub(r'versionName\s+"[^"]+"', 'versionName "1.0.0-android-port1"', s)
-          gradle.write_text(s)
-
-          strings=root/'app/src/main/res/values/strings.xml'
-          strings.write_text('<resources>\n    <string name="app_name">Energy Drain</string>\n</resources>\n')
-
-          manifest=root/'app/src/main/AndroidManifest.xml'
-          ms=manifest.read_text()
-          ms=ms.replace('android:hardwareAccelerated="true"', 'android:hardwareAccelerated="true"\n        android:largeHeap="true"')
-          manifest.write_text(ms)
-          ET.parse(manifest)
-
-          main=root/'app/src/main/java/com/nekobot/rpgnekos/MainActivity.java'
-          js=main.read_text()
-          js=js.replace(
-              'return super.onConsoleMessage(consoleMessage);',
-              'android.util.Log.e("RPGWEB", consoleMessage.message() + " @" + consoleMessage.sourceId() + ":" + consoleMessage.lineNumber());\n                return true;'
-          )
-          old='''    @Override
-    public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-            return;
-        }
-        super.onBackPressed();
-    }'''
-          new='''    @Override
-    public void onBackPressed() {
-        if (webView != null) {
-            webView.evaluateJavascript(
-                "(function(){if(window.Input){Input._currentState['escape']=true;setTimeout(function(){Input._currentState['escape']=false;},80);}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,which:27,bubbles:true}));setTimeout(function(){document.dispatchEvent(new KeyboardEvent('keyup',{key:'Escape',keyCode:27,which:27,bubbles:true}));},80);})();",
-                null
-            );
-            return;
-        }
-        super.onBackPressed();
-    }'''
-          if old not in js:
-              raise SystemExit('onBackPressed target missing')
-          main.write_text(js.replace(old,new))
-          PY
-
-          # Tiny valid placeholder web root; real game is injected after build.
-          cat > wrapper/android/app/src/main/assets/www/index.html <<'HTML'
-          <!doctype html><html><head><meta charset="utf-8"></head><body style="background:#000;color:#fff">Energy Drain Android wrapper</body></html>
-          HTML
+          python energydrain/configure_wrapper.py wrapper/android
 
       - name: Build generic APK
         working-directory: wrapper/android
@@ -121,9 +68,7 @@ jobs:
           cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" out/tools/
           cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" out/tools/
           cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" out/tools/lib/
-          if [ -d "$ANDROID_HOME/build-tools/35.0.0/lib64" ]; then
-            cp -a "$ANDROID_HOME/build-tools/35.0.0/lib64/." out/tools/lib64/
-          fi
+          if [ -d "$ANDROID_HOME/build-tools/35.0.0/lib64" ]; then cp -a "$ANDROID_HOME/build-tools/35.0.0/lib64/." out/tools/lib64/; fi
           sha256sum out/Energy-Drain-wrapper.apk | tee out/wrapper.sha256
 
       - name: Upload wrapper
