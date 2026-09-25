@@ -12,13 +12,13 @@ def emit(s=""):
     report.append(str(s))
     print(s)
 
-ggm=next(root.rglob("globalgamemanagers"),None)
-if not ggm:
-    raise SystemExit("globalgamemanagers not found")
-emit(f"GLOBALGAMEMANAGERS={ggm}")
-emit(f"SIZE={ggm.stat().st_size}")
+core=next(root.rglob("data.unity3d"),None)
+if not core:
+    raise SystemExit("data.unity3d not found")
+emit(f"CORE_UNITY_DATA={core}")
+emit(f"SIZE={core.stat().st_size}")
 
-env=UnityPy.load(str(ggm))
+env=UnityPy.load(str(core))
 emit(f"UNITY_VERSION={getattr(env,'unity_version',None)}")
 
 types={}
