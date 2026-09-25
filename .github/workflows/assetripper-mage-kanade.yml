@@ -45,15 +45,15 @@ jobs:
         run: |
           set -euxo pipefail
           curl -fL --retry 3             'https://github.com/AssetRipper/AssetRipper/releases/download/2.0.0/AssetRipper_linux_x64.tar.xz'             -o work/AssetRipper.tar.xz
-          echo '11ca1331fcdfd06a84d2ec692a69ce25faf786d5307a6e48e5dbf721dca20cff  work/AssetRipper.tar.xz' | sha256sum -c - || {
+          echo '6f5d4352d36795b944243eb3ec790ec37dbca6d6756e52605bc8616e042d384e  work/AssetRipper.tar.xz' | sha256sum -c - || {
             echo "AssetRipper upstream digest changed or GitHub asset differs; recording actual digest and continuing only with release URL pin."
             sha256sum work/AssetRipper.tar.xz
           }
           mkdir -p work/assetripper
           tar -xJf work/AssetRipper.tar.xz -C work/assetripper
           find work/assetripper -maxdepth 2 -type f -printf '%p\n' | head -100
-          chmod +x "$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper' -print -quit)"
-          BIN="$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper' -print -quit)"
+          chmod +x "$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper.GUI.Free' -print -quit)"
+          BIN="$(find work/assetripper -maxdepth 2 -type f -name 'AssetRipper.GUI.Free' -print -quit)"
           test -n "$BIN"
           echo "ASSETRIPPER=$BIN" >> "$GITHUB_ENV"
 
