@@ -181,7 +181,7 @@ public final class MageKanadeBootstrap {
                 String content =
                     "[Desktop Entry]\n" +
                     "Name=Mage Kanade Dungeon Quest\n" +
-                    "Exec=wine C:\\MageKanade\\Mage\ Kanades\ Futanari\ Dungeon\ Quest.exe\n" +
+                    "Exec=wine \\\"C:\\\\MageKanade\\\\Mage Kanades Futanari Dungeon Quest.exe\\\"\\n" +
                     "Type=Application\n" +
                     "StartupWMClass=Mage Kanades Futanari Dungeon Quest.exe\n\n" +
                     "[Extra Data]\n" +
