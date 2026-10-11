@@ -1,0 +1,1 @@
+50e9e955b72a47c6ea2b74fe887c2c8a0c6a7da2bb2a314463b0141404fd6185  dist/EchoVault-v1.2.0-debug.apk
