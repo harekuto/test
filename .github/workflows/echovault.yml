@@ -29,13 +29,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Restore v1.1.0 source and verify checksum
+      - name: Restore v1.2.0 source and verify checksum
         shell: bash
         run: |
           set -euo pipefail
-          cp payload/source-v1.1.0.b64 source.b64
-          test "$(wc -c < source.b64)" = 27168
-          echo "4fbc8d2f614af30b7e7f75207921c2c74d6c0fc0d8b175c253f8311bee1382cc  source.b64" | sha256sum -c -
+          cp payload/source-v1.2.0.b64 source.b64
+          test "$(wc -c < source.b64)" = 29452
+          echo "41e3ec2e4d1d015b547a27752274753072fad203a9d0d7a00ba73cfe87b17d17  source.b64" | sha256sum -c -
           mkdir -p source
           base64 --decode source.b64 | tar -xJ -C source
           test -s source/app/src/main/java/com/harekuto/echovault/RetentionManager.java
@@ -59,14 +59,14 @@ jobs:
             grep -F "$symbol" /tmp/dex-strings.txt
           done
           AAPT="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/aapt"
-          "$AAPT" dump badging "$APK" | grep -E "^package: name='com.harekuto.echovault' versionCode='2' versionName='1.1.0'"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com.harekuto.echovault' versionCode='3' versionName='1.2.0'"
           mkdir -p dist
-          cp "$APK" dist/EchoVault-v1.1.0-debug.apk
-          sha256sum dist/EchoVault-v1.1.0-debug.apk | tee dist/SHA256SUMS-v1.1.0.txt
+          cp "$APK" dist/EchoVault-v1.2.0-debug.apk
+          sha256sum dist/EchoVault-v1.2.0-debug.apk | tee dist/SHA256SUMS-v1.2.0.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: EchoVault-v1.1.0-APK
-          path: dist/EchoVault-v1.1.0-debug.apk
+          name: EchoVault-v1.2.0-APK
+          path: dist/EchoVault-v1.2.0-debug.apk
           if-no-files-found: error
       - name: Publish verified APK to separate branch
         shell: bash
@@ -75,5 +75,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add dist/
-          git commit -m "Publish verified EchoVault v1.1.0 APK [skip ci]" || true
+          git commit -m "Publish verified EchoVault v1.2.0 APK [skip ci]" || true
           git push origin HEAD:echovault-apk-build
