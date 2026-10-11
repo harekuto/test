@@ -18,7 +18,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install Android platform using hosted runner SDK
+      - name: Install Android SDK 35
         shell: bash
         run: |
           set -euo pipefail
@@ -29,49 +29,51 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Restore original EchoVault source
+      - name: Restore v1.1.0 source and verify checksum
         shell: bash
         run: |
           set -euo pipefail
-          cat payload/part*.txt > source.tar.xz.b64
-          test "$(wc -c < source.tar.xz.b64)" = 18280
-          echo "8051ab27bab1dd965bd6acec5ac4373c38300aedb80a49889ba4bd314bc1c498  source.tar.xz.b64" | sha256sum -c -
+          cp payload/source-v1.1.0.b64 source.b64
+          test "$(wc -c < source.b64)" = 27168
+          echo "4fbc8d2f614af30b7e7f75207921c2c74d6c0fc0d8b175c253f8311bee1382cc  source.b64" | sha256sum -c -
           mkdir -p source
-          base64 --decode source.tar.xz.b64 | tar -xJ -C source
-          test -s source/app/src/main/AndroidManifest.xml
-          test -s source/app/src/main/java/com/harekuto/echovault/MainActivity.java
-          test -s source/app/src/main/java/com/harekuto/echovault/RecordingService.java
-      - name: Test and build Android APK
+          base64 --decode source.b64 | tar -xJ -C source
+          test -s source/app/src/main/java/com/harekuto/echovault/RetentionManager.java
+          test -s source/app/src/test/java/com/harekuto/echovault/RetentionPolicyTest.java
+      - name: Run unit tests and build APK
+        shell: bash
         run: gradle -p source :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
-      - name: Verify compiled application DEX and ZIP integrity
+      - name: Validate APK contents and package metadata
         shell: bash
         run: |
           set -euo pipefail
           APK=source/app/build/outputs/apk/debug/app-debug.apk
           test -s "$APK"
           unzip -t "$APK" | tail -n 2
-          unzip -Z1 "$APK" | grep -E '^classes[0-9]*\.dex$' | sort -V | tee /tmp/dex_entries
-          : > /tmp/echovault-dex-strings.txt
+          unzip -Z1 "$APK" | grep -E '^classes[0-9]*\.dex$' | tee /tmp/dex_entries
+          : > /tmp/dex-strings.txt
           while IFS= read -r dex; do
-            unzip -p "$APK" "$dex" | strings >> /tmp/echovault-dex-strings.txt
+            unzip -p "$APK" "$dex" | strings >> /tmp/dex-strings.txt
           done < /tmp/dex_entries
-          grep -F 'MainActivity' /tmp/echovault-dex-strings.txt
-          grep -F 'RecordingService' /tmp/echovault-dex-strings.txt
-          grep -F 'RecordingFiles' /tmp/echovault-dex-strings.txt
+          for symbol in MainActivity RecordingService RetentionManager RetentionJobService RetentionPolicy; do
+            grep -F "$symbol" /tmp/dex-strings.txt
+          done
+          AAPT="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/35.0.0/aapt"
+          "$AAPT" dump badging "$APK" | grep -E "^package: name='com.harekuto.echovault' versionCode='2' versionName='1.1.0'"
           mkdir -p dist
-          cp "$APK" dist/EchoVault-v1.0.0-debug.apk
-          sha256sum dist/EchoVault-v1.0.0-debug.apk | tee dist/SHA256SUMS.txt
+          cp "$APK" dist/EchoVault-v1.1.0-debug.apk
+          sha256sum dist/EchoVault-v1.1.0-debug.apk | tee dist/SHA256SUMS-v1.1.0.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: EchoVault-v1.0.0-APK
-          path: dist/EchoVault-v1.0.0-debug.apk
+          name: EchoVault-v1.1.0-APK
+          path: dist/EchoVault-v1.1.0-debug.apk
           if-no-files-found: error
-      - name: Commit APK to separate build branch
+      - name: Publish verified APK to separate branch
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name github-actions[bot]
+          git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add dist/
-          git commit -m "Publish verified EchoVault Android APK [skip ci]" || true
+          git commit -m "Publish verified EchoVault v1.1.0 APK [skip ci]" || true
           git push origin HEAD:echovault-apk-build
