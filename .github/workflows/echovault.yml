@@ -57,7 +57,32 @@ jobs:
           test -s "$APK"
           unzip -t "$APK" | tail -n 2
           unzip -l "$APK" | grep -E 'classes.dex|AndroidManifest.xml'
-          unzip -p "$APK" classes.dex | strings | tee /tmp/echovault-dex-strings.txt | grep -E 'MainActivity|RecordingService|RecordingFiles' || (echo 'ERROR: Missing application code in DEX'; exit 1)
+          unzip -Z1 "$APK" | grep -E '^classes[0-9]*\\.dex
+          mkdir -p dist
+          cp "$APK" dist/EchoVault-v1.0.0-debug.apk
+          sha256sum dist/EchoVault-v1.0.0-debug.apk | tee dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EchoVault-v1.0.0-APK
+          path: dist/EchoVault-v1.0.0-debug.apk
+          if-no-files-found: error
+      - name: Commit APK to separate build branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/
+          git commit -m "Publish verified EchoVault Android APK [skip ci]" || true
+          git push origin HEAD:echovault-apk-build
+ | sort -V | tee /tmp/dex_entries
+          : > /tmp/echovault-dex-strings.txt
+          while IFS= read -r dex; do
+            unzip -p "$APK" "$dex" | strings >> /tmp/echovault-dex-strings.txt
+          done < /tmp/dex_entries
+          grep -F 'MainActivity' /tmp/echovault-dex-strings.txt
+          grep -F 'RecordingService' /tmp/echovault-dex-strings.txt
+          grep -F 'RecordingFiles' /tmp/echovault-dex-strings.txt
           mkdir -p dist
           cp "$APK" dist/EchoVault-v1.0.0-debug.apk
           sha256sum dist/EchoVault-v1.0.0-debug.apk | tee dist/SHA256SUMS.txt
