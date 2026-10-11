@@ -1,0 +1,54 @@
+name: EchoVault Android APK
+on:
+  push:
+    branches: [echovault-apk-build]
+    paths:
+      - '.github/workflows/echovault.yml'
+      - 'source.tar.xz.b64'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Restore original EchoVault source
+        run: |
+          test -s source.tar.xz.b64
+          mkdir -p source
+          base64 --decode source.tar.xz.b64 | tar -xJ -C source
+          test -f source/app/src/main/AndroidManifest.xml
+      - name: Build APK and test
+        run: gradle -p source :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Verify and publish installable APK
+        run: |
+          set -euo pipefail
+          APK=source/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          unzip -t "$APK" | tail -n 2
+          unzip -l "$APK" | grep -E 'classes.dex|AndroidManifest.xml'
+          mkdir -p dist
+          cp "$APK" dist/EchoVault-v1.0.0-debug.apk
+          sha256sum dist/EchoVault-v1.0.0-debug.apk | tee dist/SHA256SUMS.txt
+          git config user.name github-actions[bot]
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add dist/
+          git commit -m "Publish verified EchoVault Android APK [skip ci]" || true
+          git push origin HEAD:echovault-apk-build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EchoVault-v1.0.0-APK
+          path: dist/EchoVault-v1.0.0-debug.apk
+          if-no-files-found: error
