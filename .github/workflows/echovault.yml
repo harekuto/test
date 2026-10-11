@@ -39,6 +39,14 @@ jobs:
           mkdir -p source
           base64 --decode source.tar.xz.b64 | tar -xJ -C source
           test -f source/app/src/main/AndroidManifest.xml
+      - name: Inspect restored source and assert core classes
+        shell: bash
+        run: |
+          set -euo pipefail
+          find source/app/src/main -type f | sort
+          find source/app/src/main/java -name '*.java' -type f -printf '%p %s bytes\\n' | sort
+          test -s source/app/src/main/java/com/harekuto/echovault/MainActivity.java
+          test -s source/app/src/main/java/com/harekuto/echovault/RecordingService.java
       - name: Test and build Android APK
         run: gradle -p source :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
       - name: Verify APK integrity
@@ -49,6 +57,7 @@ jobs:
           test -s "$APK"
           unzip -t "$APK" | tail -n 2
           unzip -l "$APK" | grep -E 'classes.dex|AndroidManifest.xml'
+          unzip -p "$APK" classes.dex | strings | tee /tmp/echovault-dex-strings.txt | grep -E 'MainActivity|RecordingService|RecordingFiles' || (echo 'ERROR: Missing application code in DEX'; exit 1)
           mkdir -p dist
           cp "$APK" dist/EchoVault-v1.0.0-debug.apk
           sha256sum dist/EchoVault-v1.0.0-debug.apk | tee dist/SHA256SUMS.txt
