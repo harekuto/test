@@ -1,16 +1,13 @@
 name: Echo Transcript Android APK
 on:
   push:
-    branches:
-      - apps/echo-transcriber-20261020
+    branches: [apps/echo-transcriber-20261020]
     paths:
       - 'echo-transcriber/**'
       - '.github/workflows/echo-transcriber.yml'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   android:
     name: Android debug build and JVM tests
@@ -22,8 +19,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Install required SDK 35 packages
-        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Android SDK 35 packages
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          SDKMANAGER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f | head -1)"
+          test -n "$SDKMANAGER"
+          "$SDKMANAGER" --install 'platforms;android-35' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
