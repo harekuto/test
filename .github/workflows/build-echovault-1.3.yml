@@ -1,4 +1,4 @@
-name: EchoVault v1.3.0 recording-safety APK
+name: EchoVault v1.3.1 safe side-by-side APK
 on:
   push:
     branches:
@@ -37,7 +37,7 @@ jobs:
       - name: Unpack source from checked-in archive
         run: |
           mkdir -p "$GITHUB_WORKSPACE/echovault-src"
-          unzip -q "$GITHUB_WORKSPACE/echovault-build/EchoVault-Android-Source-v1.3.0.zip" -d "$GITHUB_WORKSPACE/echovault-src"
+          unzip -q "$GITHUB_WORKSPACE/echovault-build/EchoVault-Android-Source-v1.3.1-Safe-Install.zip" -d "$GITHUB_WORKSPACE/echovault-src"
           test -f "$GITHUB_WORKSPACE/echovault-src/app/build.gradle"
           sed -n '1,50p' "$GITHUB_WORKSPACE/echovault-src/app/build.gradle"
       - name: Unit test and build
@@ -50,11 +50,12 @@ jobs:
           sha256sum "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 12
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -Fq "package: name='com.harekuto.echovault.safe' versionCode='5' versionName='1.3.1'"
           unzip -t "$APK" | tail -n 2
       - name: Upload built APK
         uses: actions/upload-artifact@v4
         with:
-          name: EchoVault-v1.3.0-debug-APK
+          name: EchoVault-v1.3.1-Safe-debug-APK
           path: echovault-src/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 10
