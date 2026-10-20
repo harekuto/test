@@ -126,7 +126,7 @@ class MainActivity : Activity() {
     private fun buildUi() {
         val screen = ScrollView(this).apply {
             setBackgroundColor(color("#091323"))
-            fillViewport = true
+            isFillViewport = true
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

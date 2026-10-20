@@ -30,7 +30,7 @@ data class TranscriptJob(
     fun asText(): String = buildString {
         append("Audio: ").append(name).append('\n')
         append("Model: ").append(model).append(" | Language: ").append(language).append('\n')
-        append("Progress: ").append(nextChunk).append("/").append(totalChunks).append('\n\n')
+        append("Progress: ").append(nextChunk).append("/").append(totalChunks).append("\n\n")
         for (s in segments) append('[').append(TranscriptFormat.clock(s.startMs))
             .append("] ").append(s.text.trim()).append('\n')
     }
